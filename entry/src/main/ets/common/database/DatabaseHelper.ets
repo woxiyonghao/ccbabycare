@@ -246,6 +246,11 @@ export class DatabaseHelper {
     if (!this.rdbStore) return;
 
     try {
+      // 彻底清理旧版本预置在 SQLite 中的 3 条模拟奶粉数据，保持无默认预设
+      await this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_FORMULA_PROFILE} WHERE id IN ('fp_1', 'fp_2', 'fp_3')`);
+    } catch (e) {}
+
+    try {
       const babyPred = new relationalStore.RdbPredicates(AppConstants.TABLE_BABY);
       const resultSet = await this.rdbStore.query(babyPred);
       const babyCount = resultSet.rowCount;
@@ -470,8 +475,12 @@ export class DatabaseHelper {
       const fpRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_FORMULA_PROFILE));
       const formulas: FormulaProfile[] = [];
       while (fpRs.goToNextRow()) {
+        const id = fpRs.getString(fpRs.getColumnIndex('id'));
+        if (id === 'fp_1' || id === 'fp_2' || id === 'fp_3') {
+          continue;
+        }
         const fp = new FormulaProfile(
-          fpRs.getString(fpRs.getColumnIndex('id')),
+          id,
           fpRs.getString(fpRs.getColumnIndex('stage')),
           fpRs.getDouble(fpRs.getColumnIndex('water_per_scoop')),
           fpRs.getDouble(fpRs.getColumnIndex('default_amount')),
@@ -492,8 +501,9 @@ export class DatabaseHelper {
             }
           }
         }
-        // 用户要求：不要有默认常用！如果用户未设置常用，则保持无常用状态
         this.formulaProfiles = formulas;
+      } else {
+        this.formulaProfiles = [];
       }
     } catch (err) {
       console.warn('loadAllDataFromDb error:', JSON.stringify(err));
@@ -501,15 +511,11 @@ export class DatabaseHelper {
   }
 
   /**
-   * 初始化公共参考字典数据（奶粉库预设与疫苗计划表模板，不带虚拟宝宝，不设默认常用）
+   * 初始化公共参考字典数据（奶粉库默认为空不设默认数据；疫苗按国家标准计划表展示）
    */
   private initReferenceDataInMemory(): void {
-    if (this.formulaProfiles.length === 0) {
-      const fp1 = new FormulaProfile('fp_1', '1段 (0-6个月)', 30, 120, '常用配方', 0);
-      const fp2 = new FormulaProfile('fp_2', '早产/特殊配方', 30, 120, '特殊配方', 0);
-      const fp3 = new FormulaProfile('fp_3', '3段 (1-3岁)', 30, 120, '幼儿配方', 0);
-      this.formulaProfiles = [fp1, fp2, fp3];
-    }
+    // 奶粉库默认为空，由用户根据宝宝实际情况自主添加
+    this.formulaProfiles = [];
 
     if (this.vaccineList.length === 0) {
       this.vaccineList = VaccineRecord.PRESET_VACCINES.map((p, idx) => {
@@ -529,17 +535,6 @@ export class DatabaseHelper {
     if (!this.rdbStore) return;
 
     try {
-      // 检查奶粉库是否已有数据
-      const fPred = new relationalStore.RdbPredicates(AppConstants.TABLE_FORMULA_PROFILE);
-      const fSet = await this.rdbStore.query(fPred);
-      const fCount = fSet.rowCount;
-      fSet.close();
-      if (fCount <= 0) {
-        for (const fp of this.formulaProfiles) {
-          await this.insertFormulaToDb(fp);
-        }
-      }
-
       // 检查疫苗库是否已有数据
       const vPred = new relationalStore.RdbPredicates(AppConstants.TABLE_VACCINE);
       const vSet = await this.rdbStore.query(vPred);
@@ -1013,6 +1008,20 @@ export class DatabaseHelper {
     }
   }
 
+  /**
+   * 删除指定的奶粉段位配置
+   */
+  deleteFormulaProfile(formulaId: string): void {
+    this.formulaProfiles = this.formulaProfiles.filter((f: FormulaProfile) => f.id !== formulaId);
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_FORMULA_PROFILE} WHERE id = '${formulaId}'`);
+      } catch (e) {
+        console.warn('deleteFormulaProfile error:', JSON.stringify(e));
+      }
+    }
+  }
+
   // --- 数据导出（JSON备份包） ---
   exportAllDataJson(): string {
     const backupObj: Record<string, Object> = {
@@ -1032,7 +1041,7 @@ export class DatabaseHelper {
   }
 
   /**
-   * 清除所有本地记录数据（不可恢复，重置无默认常用）
+   * 清除所有本地记录数据（不可恢复，彻底重置为空白状态）
    */
   clearAllData(): void {
     this.babyList = [];
@@ -1044,11 +1053,7 @@ export class DatabaseHelper {
     this.sleepList = [];
     this.growthList = [];
     this.expenseList = [];
-
-    // 重置所有奶粉常用标记为 0（无默认常用）
-    this.formulaProfiles.forEach(f => {
-      f.isDefault = 0;
-    });
+    this.formulaProfiles = [];
 
     AppStorage.setOrCreate('CACHE_BABY_INFO', '');
     AppStorage.setOrCreate('HAS_USER_DATA', false);
@@ -1070,7 +1075,7 @@ export class DatabaseHelper {
         this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_VACCINE}`);
         this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_GROWTH}`);
         this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_EXPENSE}`);
-        this.rdbStore.executeSql(`UPDATE ${AppConstants.TABLE_FORMULA_PROFILE} SET is_default = 0`);
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_FORMULA_PROFILE}`);
       } catch (err) {
         console.warn('clearAllData sql error:', JSON.stringify(err));
       }

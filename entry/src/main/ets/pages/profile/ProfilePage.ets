@@ -132,53 +132,81 @@ export struct ProfilePage {
             }
             .width('100%')
 
-            ForEach(this.formulas, (item: FormulaProfile) => {
-              Row() {
-                Column({ space: 2 }) {
-                  Text(item.stage)
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Bold)
-                    .fontColor(AppConstants.COLOR_TEXT_MAIN)
-                  Text(`冲调比: 1平勺兑 ${item.waterPerScoop}ml 水 · 常用量: ${item.defaultAmount}ml`)
-                    .fontSize(11)
-                    .fontColor(AppConstants.COLOR_TEXT_MUTED)
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
+            if (this.formulas.length === 0) {
+              Column({ space: 4 }) {
+                Text('暂无奶粉段位配置')
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(AppConstants.COLOR_TEXT_MAIN)
+                Text('点击右上角「+」即可添加宝宝常喝的奶粉与冲调配比')
+                  .fontSize(11)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              .width('100%')
+              .padding({ top: 14, bottom: 14 })
+              .alignItems(HorizontalAlign.Center)
+            } else {
+              ForEach(this.formulas, (item: FormulaProfile) => {
+                Row() {
+                  Column({ space: 2 }) {
+                    Text(item.stage)
+                      .fontSize(13)
+                      .fontWeight(FontWeight.Bold)
+                      .fontColor(AppConstants.COLOR_TEXT_MAIN)
+                    Text(`冲调比: 1平勺兑 ${item.waterPerScoop}ml 水 · 常用量: ${item.defaultAmount}ml`)
+                      .fontSize(11)
+                      .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
 
-                Blank()
+                  Blank()
 
-                // 用户要求：不要有默认，只有用户主动设为常用后才高亮，且全局只能设置一个
-                if (this.currentDefaultFormulaId !== '' && this.currentDefaultFormulaId === item.id) {
-                  Text('常用 ✓')
+                  // 用户要求：不要有默认，只有用户主动设为常用后才高亮，且全局只能设置一个
+                  if (this.currentDefaultFormulaId !== '' && this.currentDefaultFormulaId === item.id) {
+                    Text('常用 ✓')
+                      .fontSize(12)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(AppConstants.COLOR_SUCCESS)
+                      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                      .backgroundColor(AppConstants.COLOR_SUCCESS_LIGHT)
+                      .borderRadius(8)
+                  } else {
+                    Text('设为常用')
+                      .fontSize(11)
+                      .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                      .backgroundColor('#F3F4F6')
+                      .borderRadius(8)
+                      .onClick(() => {
+                        this.currentDefaultFormulaId = item.id;
+                        DatabaseHelper.getInstance().setDefaultFormula(item.id);
+                        this.refreshData();
+                        try {
+                          promptAction.showToast({ message: `已将 ${item.stage} 设为常用` });
+                        } catch (e) {}
+                      })
+                  }
+
+                  // 支持删除奶粉段位
+                  Text('✕')
                     .fontSize(12)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor(AppConstants.COLOR_SUCCESS)
-                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                    .backgroundColor(AppConstants.COLOR_SUCCESS_LIGHT)
-                    .borderRadius(8)
-                } else {
-                  Text('设为常用')
-                    .fontSize(11)
                     .fontColor(AppConstants.COLOR_TEXT_MUTED)
-                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                    .backgroundColor('#F3F4F6')
-                    .borderRadius(8)
+                    .padding({ left: 8, right: 4, top: 4, bottom: 4 })
                     .onClick(() => {
-                      this.currentDefaultFormulaId = item.id;
-                      DatabaseHelper.getInstance().setDefaultFormula(item.id);
+                      DatabaseHelper.getInstance().deleteFormulaProfile(item.id);
                       this.refreshData();
                       try {
-                        promptAction.showToast({ message: `已将 ${item.stage} 设为常用` });
+                        promptAction.showToast({ message: '已删除该奶粉配置' });
                       } catch (e) {}
                     })
                 }
-              }
-              .width('100%')
-              .padding(10)
-              .backgroundColor('#FFFBF5')
-              .borderRadius(10)
-            }, (item: FormulaProfile) => `${item.id}_${item.isDefault}_${this.currentDefaultFormulaId}`)
+                .width('100%')
+                .padding(10)
+                .backgroundColor('#FFFBF5')
+                .borderRadius(10)
+              }, (item: FormulaProfile) => `${item.id}_${item.isDefault}_${this.currentDefaultFormulaId}`)
+            }
           }
           .width('100%')
           .padding(14)
