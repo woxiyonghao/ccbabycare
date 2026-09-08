@@ -21,16 +21,23 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
   }
 
-  onWindowStageCreate(windowStage: window.WindowStage): void {
+  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
     // Main window is created, set main page for this ability
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
 
-    windowStage.loadContent('pages/Index', (err) => {
+    // 确保数据库与极速缓存完成初始化
+    await DatabaseHelper.getInstance().init(this.context);
+
+    // 用户系统启动流转：判断是否有用户数据，无数据则打开编辑设置页，有数据则直接进入首页
+    const hasUser = DatabaseHelper.getInstance().hasUserData();
+    const targetPage = hasUser ? 'pages/Index' : 'pages/profile/EditBabyProfilePage';
+
+    windowStage.loadContent(targetPage, (err) => {
       if (err.code) {
         hilog.error(DOMAIN, 'testTag', 'Failed to load the content. Cause: %{public}s', JSON.stringify(err));
         return;
       }
-      hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
+      hilog.info(DOMAIN, 'testTag', `Succeeded in loading targetPage: ${targetPage}`);
     });
   }
 

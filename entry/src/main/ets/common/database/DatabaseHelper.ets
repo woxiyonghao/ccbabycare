@@ -1,4 +1,5 @@
 import relationalStore from '@ohos.data.relationalStore';
+import dataPreferences from '@ohos.data.preferences';
 import common from '@ohos.app.ability.common';
 import { AppConstants } from '../constants/AppConstants';
 import { BabyModel } from '../models/BabyModel';
@@ -11,16 +12,19 @@ import { ExpenseRecord } from '../models/ExpenseRecord';
 import { FormulaProfile } from '../models/FormulaProfile';
 
 /**
- * 本地关系型数据库（RdbStore / SQLite）单例管理器
- * 完全离线，数据存储在设备沙盒
+ * 本地关系型数据库（RdbStore / SQLite）与 Preferences 极速缓存单例管理器
+ * 实现真实的本地 SQLite 持久化存储与极速内存缓存秒开同步
  */
 export class DatabaseHelper {
   private static instance: DatabaseHelper | null = null;
   private rdbStore: relationalStore.RdbStore | null = null;
+  private pref: dataPreferences.Preferences | null = null;
   private isInitialized: boolean = false;
+  private isUserOnboarded: boolean = false;
+  private cachedBaby: BabyModel | null = null;
 
-  // 内存快速缓存，保证秒开与实时刷新响应
-  private currentBabyId: string = 'baby_default';
+  // 内存快速缓存，保证界面实时秒开与无感响应
+  private currentBabyId: string = '';
   private babyList: BabyModel[] = [];
   private feedingList: FeedingRecord[] = [];
   private eliminationList: EliminationRecord[] = [];
@@ -31,7 +35,7 @@ export class DatabaseHelper {
   private formulaProfiles: FormulaProfile[] = [];
 
   private constructor() {
-    this.initDefaultSeedData();
+    this.initReferenceDataInMemory();
   }
 
   static getInstance(): DatabaseHelper {
@@ -42,13 +46,44 @@ export class DatabaseHelper {
   }
 
   /**
-   * 初始化数据库与表结构
+   * 初始化 Preferences 极速缓存与 SQLite 数据库
    */
   async init(context: common.UIAbilityContext): Promise<void> {
     if (this.isInitialized && this.rdbStore) {
       return;
     }
 
+    // 1. 初始化 Preferences 快速恢复用户数据
+    try {
+      this.pref = await dataPreferences.getPreferences(context, 'ccbabycare_user_store');
+      const hasUserPref = await this.pref.get('HAS_USER_DATA', false) as boolean;
+      const cachedBabyStr = await this.pref.get('CACHED_BABY_INFO', '') as string;
+      if (cachedBabyStr) {
+        try {
+          const parsed = JSON.parse(cachedBabyStr) as Record<string, Object>;
+          this.cachedBaby = new BabyModel(
+            (parsed['id'] as string) || '',
+            (parsed['name'] as string) || '',
+            (parsed['birthday'] as number) || 0,
+            (parsed['gender'] as string) || 'boy',
+            (parsed['birthWeight'] !== undefined && parsed['birthWeight'] !== null ? (parsed['birthWeight'] as number) : 0),
+            (parsed['birthHeight'] !== undefined && parsed['birthHeight'] !== null ? (parsed['birthHeight'] as number) : 0),
+            (parsed['bloodType'] as string) || '未知',
+            (parsed['avatar'] as string) || '👶',
+            (parsed['notes'] as string) || '',
+            (parsed['isDefault'] as number) || 1,
+            (parsed['createdAt'] as number) || Date.now()
+          );
+          AppStorage.setOrCreate('CACHE_BABY_INFO', cachedBabyStr);
+        } catch (e) {}
+      }
+      this.isUserOnboarded = hasUserPref;
+      AppStorage.setOrCreate('HAS_USER_DATA', hasUserPref);
+    } catch (e) {
+      console.warn('Preferences init error:', JSON.stringify(e));
+    }
+
+    // 2. 初始化 SQLite 数据库
     const config: relationalStore.StoreConfig = {
       name: AppConstants.DB_NAME,
       securityLevel: relationalStore.SecurityLevel.S1
@@ -57,6 +92,7 @@ export class DatabaseHelper {
     try {
       this.rdbStore = await relationalStore.getRdbStore(context, config);
       await this.createTables();
+      await this.loadOrSeedDatabase();
       this.isInitialized = true;
     } catch (e) {
       console.warn('DatabaseHelper init error:', JSON.stringify(e));
@@ -204,117 +240,572 @@ export class DatabaseHelper {
   }
 
   /**
-   * 初始化默认种子数据（保证初次安装即开即用）
+   * 检查 SQLite 是否为空；若已有宝宝数据则加载到内存与极速缓存中，若为空则仅初始化基础字典
    */
-  private initDefaultSeedData(): void {
-    const now = Date.now();
-    // 默认3个月大的可爱宝宝
-    const defaultBirthday = now - (90 * 24 * 60 * 60 * 1000);
-    const baby = new BabyModel(
-      'baby_default',
-      '萌萌宝',
-      defaultBirthday,
-      'boy',
-      3.3,
-      50.0,
-      'O',
-      '👶',
-      '健康活泼的小天使',
-      1
-    );
-    this.babyList = [baby];
-    this.currentBabyId = baby.id;
+  private async loadOrSeedDatabase(): Promise<void> {
+    if (!this.rdbStore) return;
 
-    // 预置默认喂养记录
-    const f1 = new FeedingRecord(
-      'f_1',
-      baby.id,
-      now - (2 * 60 * 60 * 1000), // 2小时前
-      'FORMULA',
-      120,
-      'ml',
-      'MOM'
-    );
-    f1.formulaStage = '1段 (0-6个月)';
-    f1.scoops = 4;
-    f1.waterAmount = 120;
-    f1.notes = '喝得很香，拍嗝顺利';
+    try {
+      const babyPred = new relationalStore.RdbPredicates(AppConstants.TABLE_BABY);
+      const resultSet = await this.rdbStore.query(babyPred);
+      const babyCount = resultSet.rowCount;
+      resultSet.close();
 
-    const f2 = new FeedingRecord(
-      'f_2',
-      baby.id,
-      now - (6 * 60 * 60 * 1000),
-      'BREASTFEEDING',
-      25,
-      '分钟',
-      'MOM'
-    );
-    f2.leftDuration = 15;
-    f2.rightDuration = 10;
-
-    this.feedingList = [f1, f2];
-
-    // 预置排泄记录
-    const e1 = new EliminationRecord('e_1', baby.id, now - (3 * 60 * 60 * 1000), 'POOP', 'GRANDPARENT');
-    e1.stoolTexture = '软便 (正常)';
-    e1.stoolColor = '金黄色';
-    e1.volume = '中量';
-    this.eliminationList = [e1];
-
-    // 预置睡眠记录
-    const s1 = new SleepRecord(
-      's_1',
-      baby.id,
-      now - (5 * 60 * 60 * 1000),
-      now - (3 * 60 * 60 * 1000),
-      120,
-      'MOM'
-    );
-    s1.sleepType = '白天小睡';
-    this.sleepList = [s1];
-
-    // 预置疫苗规划清单
-    this.vaccineList = VaccineRecord.PRESET_VACCINES.map((p, idx) => {
-      const v = new VaccineRecord(`v_${idx}`, baby.id, p.name, p.dose, p.monthLabel);
-      v.isFree = p.isFree ? 1 : 0;
-      if (idx === 0 || idx === 1) {
-        v.isDone = 1;
-        v.vaccinatedDate = defaultBirthday + (2 * 24 * 60 * 60 * 1000);
-        v.organization = '市妇幼保健院';
+      if (babyCount > 0) {
+        // 从真实 SQLite 数据库加载全部数据
+        await this.loadAllDataFromDb();
+        if (this.babyList.length > 0 && !!this.babyList[0].name.trim()) {
+          this.isUserOnboarded = true;
+          this.cacheBabyProfile(this.babyList[0]);
+        }
+      } else {
+        // 数据库首次创建或清空后：无宝宝档案
+        this.babyList = [];
+        this.currentBabyId = '';
+        this.isUserOnboarded = false;
+        await this.seedReferenceDataOnly();
       }
-      return v;
-    });
-
-    // 预置成长记录（0月与3月）
-    const g0 = new GrowthRecord('g_0', baby.id, defaultBirthday, 50.0, 3.3, 0);
-    g0.heightStatus = '正常';
-    g0.weightStatus = '正常';
-    g0.percentileText = '符合2026中国儿童生长标准';
-
-    const g1 = new GrowthRecord('g_1', baby.id, now, 62.5, 6.8, 3);
-    g1.heightStatus = '正常';
-    g1.weightStatus = '正常';
-    g1.percentileText = '生长曲线平稳发育正常';
-    this.growthList = [g0, g1];
-
-    // 预置记账数据（图二特色）
-    const exp1 = new ExpenseRecord('exp_1', baby.id, now - (4 * 24 * 60 * 60 * 1000), '奶粉配方', 320, '1段原罐原装');
-    const exp2 = new ExpenseRecord('exp_2', baby.id, now - (8 * 24 * 60 * 60 * 1000), '纸尿裤', 189, 'NB码两包');
-    this.expenseList = [exp1, exp2];
-
-    // 预置奶粉库
-    const fp1 = new FormulaProfile('fp_1', '1段 (0-6个月)', 30, 120, '进口有机奶粉', 1);
-    this.formulaProfiles = [fp1];
+    } catch (err) {
+      console.warn('loadOrSeedDatabase error:', JSON.stringify(err));
+    }
   }
 
-  // --- 宝宝档案 CRUD ---
+  /**
+   * 将内存默认种子写入真实 SQLite
+   */
+  private async persistSeedDataToDb(): Promise<void> {
+    if (!this.rdbStore) return;
+
+    try {
+      // 1. 宝宝
+      for (const baby of this.babyList) {
+        await this.insertBabyToDb(baby);
+      }
+      // 2. 喂养
+      for (const f of this.feedingList) {
+        await this.insertFeedingToDb(f);
+      }
+      // 3. 排泄
+      for (const e of this.eliminationList) {
+        await this.insertEliminationToDb(e);
+      }
+      // 4. 睡眠
+      for (const s of this.sleepList) {
+        await this.insertSleepToDb(s);
+      }
+      // 5. 疫苗
+      for (const v of this.vaccineList) {
+        await this.insertVaccineToDb(v);
+      }
+      // 6. 生长
+      for (const g of this.growthList) {
+        await this.insertGrowthToDb(g);
+      }
+      // 7. 花销
+      for (const exp of this.expenseList) {
+        await this.insertExpenseToDb(exp);
+      }
+      // 8. 奶粉库
+      for (const fp of this.formulaProfiles) {
+        await this.insertFormulaToDb(fp);
+      }
+    } catch (e) {
+      console.warn('persistSeedDataToDb error:', JSON.stringify(e));
+    }
+  }
+
+  /**
+   * 从真实 SQLite 数据库加载所有数据
+   */
+  private async loadAllDataFromDb(): Promise<void> {
+    if (!this.rdbStore) return;
+
+    try {
+      // 1. 宝宝
+      const babyRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_BABY));
+      const babies: BabyModel[] = [];
+      while (babyRs.goToNextRow()) {
+        const b = new BabyModel(
+          babyRs.getString(babyRs.getColumnIndex('id')),
+          babyRs.getString(babyRs.getColumnIndex('name')),
+          babyRs.getLong(babyRs.getColumnIndex('birthday')),
+          babyRs.getString(babyRs.getColumnIndex('gender')),
+          babyRs.getDouble(babyRs.getColumnIndex('birth_weight')),
+          babyRs.getDouble(babyRs.getColumnIndex('birth_height')),
+          babyRs.getString(babyRs.getColumnIndex('blood_type')),
+          babyRs.getString(babyRs.getColumnIndex('avatar')),
+          babyRs.getString(babyRs.getColumnIndex('notes')),
+          babyRs.getLong(babyRs.getColumnIndex('is_default'))
+        );
+        babies.push(b);
+      }
+      babyRs.close();
+      if (babies.length > 0) {
+        this.babyList = babies;
+        this.currentBabyId = babies[0].id;
+      }
+
+      // 2. 喂养
+      const feedRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_FEEDING));
+      const feeds: FeedingRecord[] = [];
+      while (feedRs.goToNextRow()) {
+        const f = new FeedingRecord(
+          feedRs.getString(feedRs.getColumnIndex('id')),
+          feedRs.getString(feedRs.getColumnIndex('baby_id')),
+          feedRs.getLong(feedRs.getColumnIndex('record_time')),
+          feedRs.getString(feedRs.getColumnIndex('feeding_type')),
+          feedRs.getDouble(feedRs.getColumnIndex('amount')),
+          feedRs.getString(feedRs.getColumnIndex('amount_unit')),
+          feedRs.getString(feedRs.getColumnIndex('caregiver_id'))
+        );
+        f.notes = feedRs.getString(feedRs.getColumnIndex('notes'));
+        f.formulaStage = feedRs.getString(feedRs.getColumnIndex('formula_stage'));
+        f.scoops = feedRs.getDouble(feedRs.getColumnIndex('scoops'));
+        f.waterAmount = feedRs.getDouble(feedRs.getColumnIndex('water_amount'));
+        f.leftDuration = feedRs.getDouble(feedRs.getColumnIndex('left_duration'));
+        f.rightDuration = feedRs.getDouble(feedRs.getColumnIndex('right_duration'));
+        f.solidsName = feedRs.getString(feedRs.getColumnIndex('solids_name'));
+        feeds.push(f);
+      }
+      feedRs.close();
+      this.feedingList = feeds;
+
+      // 3. 排便
+      const elimRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_ELIMINATION));
+      const elims: EliminationRecord[] = [];
+      while (elimRs.goToNextRow()) {
+        const e = new EliminationRecord(
+          elimRs.getString(elimRs.getColumnIndex('id')),
+          elimRs.getString(elimRs.getColumnIndex('baby_id')),
+          elimRs.getLong(elimRs.getColumnIndex('record_time')),
+          elimRs.getString(elimRs.getColumnIndex('elimination_type')),
+          elimRs.getString(elimRs.getColumnIndex('caregiver_id'))
+        );
+        e.stoolTexture = elimRs.getString(elimRs.getColumnIndex('stool_texture'));
+        e.stoolColor = elimRs.getString(elimRs.getColumnIndex('stool_color'));
+        e.volume = elimRs.getString(elimRs.getColumnIndex('volume'));
+        e.notes = elimRs.getString(elimRs.getColumnIndex('notes'));
+        elims.push(e);
+      }
+      elimRs.close();
+      this.eliminationList = elims;
+
+      // 4. 睡眠
+      const sleepRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_SLEEP));
+      const sleeps: SleepRecord[] = [];
+      while (sleepRs.goToNextRow()) {
+        const s = new SleepRecord(
+          sleepRs.getString(sleepRs.getColumnIndex('id')),
+          sleepRs.getString(sleepRs.getColumnIndex('baby_id')),
+          sleepRs.getLong(sleepRs.getColumnIndex('start_time')),
+          sleepRs.getLong(sleepRs.getColumnIndex('end_time')),
+          sleepRs.getLong(sleepRs.getColumnIndex('duration_minutes')),
+          sleepRs.getString(sleepRs.getColumnIndex('caregiver_id'))
+        );
+        s.sleepType = sleepRs.getString(sleepRs.getColumnIndex('sleep_type'));
+        s.notes = sleepRs.getString(sleepRs.getColumnIndex('notes'));
+        sleeps.push(s);
+      }
+      sleepRs.close();
+      this.sleepList = sleeps;
+
+      // 5. 疫苗
+      const vacRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_VACCINE));
+      const vacs: VaccineRecord[] = [];
+      while (vacRs.goToNextRow()) {
+        const v = new VaccineRecord(
+          vacRs.getString(vacRs.getColumnIndex('id')),
+          vacRs.getString(vacRs.getColumnIndex('baby_id')),
+          vacRs.getString(vacRs.getColumnIndex('vaccine_name')),
+          vacRs.getString(vacRs.getColumnIndex('dose')),
+          vacRs.getString(vacRs.getColumnIndex('month_label'))
+        );
+        v.isDone = vacRs.getLong(vacRs.getColumnIndex('is_done'));
+        v.vaccinatedDate = vacRs.getLong(vacRs.getColumnIndex('vaccinated_date'));
+        vacs.push(v);
+      }
+      vacRs.close();
+      if (vacs.length > 0) {
+        this.vaccineList = vacs;
+      }
+
+      // 6. 生长
+      const grRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_GROWTH));
+      const growths: GrowthRecord[] = [];
+      while (grRs.goToNextRow()) {
+        const g = new GrowthRecord(
+          grRs.getString(grRs.getColumnIndex('id')),
+          grRs.getString(grRs.getColumnIndex('baby_id')),
+          grRs.getLong(grRs.getColumnIndex('record_date')),
+          grRs.getDouble(grRs.getColumnIndex('height')),
+          grRs.getDouble(grRs.getColumnIndex('weight')),
+          grRs.getLong(grRs.getColumnIndex('month_age'))
+        );
+        g.heightStatus = grRs.getString(grRs.getColumnIndex('height_status'));
+        g.weightStatus = grRs.getString(grRs.getColumnIndex('weight_status'));
+        g.percentileText = grRs.getString(grRs.getColumnIndex('percentile_text'));
+        growths.push(g);
+      }
+      grRs.close();
+      this.growthList = growths;
+
+      // 7. 花销
+      const expRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_EXPENSE));
+      const expenses: ExpenseRecord[] = [];
+      while (expRs.goToNextRow()) {
+        const exp = new ExpenseRecord(
+          expRs.getString(expRs.getColumnIndex('id')),
+          expRs.getString(expRs.getColumnIndex('baby_id')),
+          expRs.getLong(expRs.getColumnIndex('expense_date')),
+          expRs.getString(expRs.getColumnIndex('category')),
+          expRs.getDouble(expRs.getColumnIndex('amount')),
+          expRs.getString(expRs.getColumnIndex('notes'))
+        );
+        expenses.push(exp);
+      }
+      expRs.close();
+      this.expenseList = expenses;
+
+      // 8. 奶粉库
+      const fpRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_FORMULA_PROFILE));
+      const formulas: FormulaProfile[] = [];
+      while (fpRs.goToNextRow()) {
+        const fp = new FormulaProfile(
+          fpRs.getString(fpRs.getColumnIndex('id')),
+          fpRs.getString(fpRs.getColumnIndex('stage')),
+          fpRs.getDouble(fpRs.getColumnIndex('water_per_scoop')),
+          fpRs.getDouble(fpRs.getColumnIndex('default_amount')),
+          fpRs.getString(fpRs.getColumnIndex('brand_name')),
+          fpRs.getLong(fpRs.getColumnIndex('is_default'))
+        );
+        formulas.push(fp);
+      }
+      fpRs.close();
+      if (formulas.length > 0) {
+        let hasDefault = false;
+        for (let i = 0; i < formulas.length; i++) {
+          if (formulas[i].isDefault === 1) {
+            if (!hasDefault) {
+              hasDefault = true;
+            } else {
+              formulas[i].isDefault = 0;
+            }
+          }
+        }
+        // 用户要求：不要有默认常用！如果用户未设置常用，则保持无常用状态
+        this.formulaProfiles = formulas;
+      }
+    } catch (err) {
+      console.warn('loadAllDataFromDb error:', JSON.stringify(err));
+    }
+  }
+
+  /**
+   * 初始化公共参考字典数据（奶粉库预设与疫苗计划表模板，不带虚拟宝宝，不设默认常用）
+   */
+  private initReferenceDataInMemory(): void {
+    if (this.formulaProfiles.length === 0) {
+      const fp1 = new FormulaProfile('fp_1', '1段 (0-6个月)', 30, 120, '常用配方', 0);
+      const fp2 = new FormulaProfile('fp_2', '早产/特殊配方', 30, 120, '特殊配方', 0);
+      const fp3 = new FormulaProfile('fp_3', '3段 (1-3岁)', 30, 120, '幼儿配方', 0);
+      this.formulaProfiles = [fp1, fp2, fp3];
+    }
+
+    if (this.vaccineList.length === 0) {
+      this.vaccineList = VaccineRecord.PRESET_VACCINES.map((p, idx) => {
+        const v = new VaccineRecord(`v_${idx}`, '', p.name, p.dose, p.monthLabel);
+        v.isDone = 0;
+        v.vaccinatedDate = 0;
+        return v;
+      });
+    }
+  }
+
+  /**
+   * 将公共字典数据持久化到 SQLite
+   */
+  private async seedReferenceDataOnly(): Promise<void> {
+    this.initReferenceDataInMemory();
+    if (!this.rdbStore) return;
+
+    try {
+      // 检查奶粉库是否已有数据
+      const fPred = new relationalStore.RdbPredicates(AppConstants.TABLE_FORMULA_PROFILE);
+      const fSet = await this.rdbStore.query(fPred);
+      const fCount = fSet.rowCount;
+      fSet.close();
+      if (fCount <= 0) {
+        for (const fp of this.formulaProfiles) {
+          await this.insertFormulaToDb(fp);
+        }
+      }
+
+      // 检查疫苗库是否已有数据
+      const vPred = new relationalStore.RdbPredicates(AppConstants.TABLE_VACCINE);
+      const vSet = await this.rdbStore.query(vPred);
+      const vCount = vSet.rowCount;
+      vSet.close();
+      if (vCount <= 0) {
+        for (const v of this.vaccineList) {
+          await this.insertVaccineToDb(v);
+        }
+      }
+    } catch (e) {
+      console.warn('seedReferenceDataOnly error:', JSON.stringify(e));
+    }
+  }
+
+  // --- SQLite 写入私有辅助函数 ---
+  private async insertBabyToDb(b: BabyModel): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: b.id,
+        name: b.name,
+        birthday: b.birthday,
+        gender: b.gender,
+        birth_weight: b.birthWeight,
+        birth_height: b.birthHeight,
+        blood_type: b.bloodType,
+        avatar: b.avatar,
+        notes: b.notes,
+        is_default: b.isDefault,
+        created_at: b.createdAt
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_BABY, bucket);
+    } catch (e) {
+      console.warn('insertBabyToDb error:', JSON.stringify(e));
+    }
+  }
+
+  private async insertFeedingToDb(f: FeedingRecord): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: f.id,
+        baby_id: f.babyId,
+        record_time: f.recordTime,
+        feeding_type: f.feedingType,
+        amount: f.amount,
+        amount_unit: f.amountUnit,
+        formula_stage: f.formulaStage,
+        scoops: f.scoops,
+        water_amount: f.waterAmount,
+        left_duration: f.leftDuration,
+        right_duration: f.rightDuration,
+        suck_status: f.suckStatus,
+        milk_source: f.milkSource,
+        solids_name: f.solidsName,
+        solids_ingredients: f.solidsIngredients,
+        is_new_food: f.isNewFood ? 1 : 0,
+        has_allergy: f.hasAllergy ? 1 : 0,
+        allergy_note: f.allergyNote,
+        caregiver_id: f.caregiverId,
+        notes: f.notes,
+        created_at: f.createdAt
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_FEEDING, bucket);
+    } catch (e) {
+      console.warn('insertFeedingToDb error:', JSON.stringify(e));
+    }
+  }
+
+  private async insertEliminationToDb(e: EliminationRecord): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: e.id,
+        baby_id: e.babyId,
+        record_time: e.recordTime,
+        elimination_type: e.eliminationType,
+        stool_texture: e.stoolTexture,
+        stool_color: e.stoolColor,
+        volume: e.volume,
+        is_abnormal: e.isAbnormal ? 1 : 0,
+        abnormal_notes: e.abnormalNotes,
+        caregiver_id: e.caregiverId,
+        notes: e.notes,
+        created_at: e.createdAt
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_ELIMINATION, bucket);
+    } catch (err) {
+      console.warn('insertEliminationToDb error:', JSON.stringify(err));
+    }
+  }
+
+  private async insertSleepToDb(s: SleepRecord): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: s.id,
+        baby_id: s.babyId,
+        start_time: s.startTime,
+        end_time: s.endTime,
+        duration_minutes: s.durationMinutes,
+        sleep_type: s.sleepType,
+        method: s.method,
+        night_wake_count: s.nightWakeCount,
+        caregiver_id: s.caregiverId,
+        notes: s.notes,
+        created_at: s.createdAt
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_SLEEP, bucket);
+    } catch (err) {
+      console.warn('insertSleepToDb error:', JSON.stringify(err));
+    }
+  }
+
+  private async insertVaccineToDb(v: VaccineRecord): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: v.id,
+        baby_id: v.babyId,
+        vaccine_name: v.vaccineName,
+        month_label: v.monthLabel,
+        dose: v.dose,
+        is_done: v.isDone,
+        vaccinated_date: v.vaccinatedDate,
+        organization: v.organization,
+        batch_number: v.batchNumber,
+        is_free: v.isFree,
+        adverse_reaction: v.adverseReaction,
+        reminder_date: v.reminderDate,
+        notes: v.notes,
+        created_at: v.createdAt
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_VACCINE, bucket);
+    } catch (err) {
+      console.warn('insertVaccineToDb error:', JSON.stringify(err));
+    }
+  }
+
+  private async insertGrowthToDb(g: GrowthRecord): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: g.id,
+        baby_id: g.babyId,
+        record_date: g.recordDate,
+        month_age: g.monthAge,
+        height: g.height,
+        weight: g.weight,
+        head_circumference: g.headCircumference,
+        height_status: g.heightStatus,
+        weight_status: g.weightStatus,
+        percentile_text: g.percentileText,
+        measure_location: g.measureLocation,
+        caregiver_id: g.caregiverId,
+        notes: g.notes,
+        created_at: g.createdAt
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_GROWTH, bucket);
+    } catch (err) {
+      console.warn('insertGrowthToDb error:', JSON.stringify(err));
+    }
+  }
+
+  private async insertExpenseToDb(exp: ExpenseRecord): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: exp.id,
+        baby_id: exp.babyId,
+        expense_date: exp.expenseDate,
+        category: exp.category,
+        amount: exp.amount,
+        notes: exp.notes,
+        created_at: exp.createdAt
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_EXPENSE, bucket);
+    } catch (err) {
+      console.warn('insertExpenseToDb error:', JSON.stringify(err));
+    }
+  }
+
+  private async insertFormulaToDb(fp: FormulaProfile): Promise<void> {
+    if (!this.rdbStore) return;
+    try {
+      const bucket: relationalStore.ValuesBucket = {
+        id: fp.id,
+        stage: fp.stage,
+        water_per_scoop: fp.waterPerScoop,
+        default_amount: fp.defaultAmount,
+        brand_name: fp.brandName,
+        is_default: fp.isDefault
+      };
+      await this.rdbStore.insert(AppConstants.TABLE_FORMULA_PROFILE, bucket);
+    } catch (err) {
+      console.warn('insertFormulaToDb error:', JSON.stringify(err));
+    }
+  }
+
+  // --- 宝宝档案 CRUD 与用户系统极速缓存 ---
+  /**
+   * 判断是否存在用户数据（用于应用启动分流）
+   */
+  hasUserData(): boolean {
+    if (this.isUserOnboarded && this.babyList.length > 0 && !!this.babyList[0].name.trim()) {
+      return true;
+    }
+    if (this.cachedBaby && !!this.cachedBaby.name.trim()) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 持久化缓存宝宝数据到 Preferences 与 AppStorage
+   */
+  cacheBabyProfile(baby: BabyModel): void {
+    this.cachedBaby = baby;
+    const jsonStr = JSON.stringify(baby);
+    AppStorage.setOrCreate('CACHE_BABY_INFO', jsonStr);
+    AppStorage.setOrCreate('HAS_USER_DATA', true);
+    if (this.pref) {
+      try {
+        this.pref.putSync('HAS_USER_DATA', true);
+        this.pref.putSync('CACHED_BABY_INFO', jsonStr);
+        this.pref.flush();
+      } catch (e) {
+        console.warn('cacheBabyProfile pref error:', JSON.stringify(e));
+      }
+    }
+  }
+
+  /**
+   * 获取极速缓存的宝宝对象（主页秒开专用）
+   */
+  getCachedBaby(): BabyModel | null {
+    if (this.cachedBaby && !!this.cachedBaby.name.trim()) {
+      return this.cachedBaby;
+    }
+    if (this.babyList.length > 0 && !!this.babyList[0].name.trim()) {
+      return this.babyList[0];
+    }
+    return null;
+  }
+
   getBabies(): BabyModel[] {
+    if (this.babyList.length === 0 && this.cachedBaby && !!this.cachedBaby.name.trim()) {
+      return [this.cachedBaby];
+    }
     return this.babyList;
   }
 
   getCurrentBaby(): BabyModel {
+    if (this.cachedBaby && !!this.cachedBaby.name.trim()) {
+      return this.cachedBaby;
+    }
     const found = this.babyList.find(b => b.id === this.currentBabyId);
-    return found || this.babyList[0];
+    if (found) {
+      return found;
+    }
+    if (this.babyList.length > 0) {
+      return this.babyList[0];
+    }
+    // 兜底返回空对象，无虚拟假数据
+    return new BabyModel('', '', 0, 'boy', 0, 0, '未知', '👶', '', 1, Date.now());
   }
 
   setCurrentBabyId(id: string): void {
@@ -322,7 +813,49 @@ export class DatabaseHelper {
   }
 
   addBaby(baby: BabyModel): void {
-    this.babyList.push(baby);
+    if (!baby.id) {
+      baby.id = `baby_${Date.now()}`;
+    }
+    baby.isDefault = 1;
+    this.babyList = [baby];
+    this.currentBabyId = baby.id;
+    this.isUserOnboarded = true;
+    this.cacheBabyProfile(baby);
+    this.insertBabyToDb(baby);
+  }
+
+  updateBaby(baby: BabyModel): void {
+    if (!baby.id) {
+      baby.id = this.currentBabyId || `baby_${Date.now()}`;
+    }
+    const idx = this.babyList.findIndex(b => b.id === baby.id);
+    if (idx !== -1) {
+      this.babyList[idx] = baby;
+    } else {
+      this.babyList.unshift(baby);
+    }
+    this.currentBabyId = baby.id;
+    this.isUserOnboarded = true;
+    this.cacheBabyProfile(baby);
+    if (this.rdbStore) {
+      try {
+        const pred = new relationalStore.RdbPredicates(AppConstants.TABLE_BABY);
+        pred.equalTo('id', baby.id);
+        const bucket: relationalStore.ValuesBucket = {
+          name: baby.name,
+          gender: baby.gender,
+          birthday: baby.birthday,
+          birth_weight: baby.birthWeight,
+          birth_height: baby.birthHeight,
+          blood_type: baby.bloodType,
+          avatar: baby.avatar,
+          notes: baby.notes
+        };
+        this.rdbStore.update(bucket, pred);
+      } catch (err) {
+        console.warn('updateBaby error:', JSON.stringify(err));
+      }
+    }
   }
 
   // --- 喂养记录 CRUD ---
@@ -335,10 +868,18 @@ export class DatabaseHelper {
 
   addFeedingRecord(record: FeedingRecord): void {
     this.feedingList.unshift(record);
+    this.insertFeedingToDb(record);
   }
 
   deleteFeedingRecord(id: string): void {
     this.feedingList = this.feedingList.filter(r => r.id !== id);
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_FEEDING} WHERE id = '${id}'`);
+      } catch (e) {
+        console.warn('deleteFeedingRecord error:', JSON.stringify(e));
+      }
+    }
   }
 
   // --- 排泄记录 CRUD ---
@@ -351,6 +892,7 @@ export class DatabaseHelper {
 
   addEliminationRecord(record: EliminationRecord): void {
     this.eliminationList.unshift(record);
+    this.insertEliminationToDb(record);
   }
 
   // --- 睡眠记录 CRUD ---
@@ -363,6 +905,7 @@ export class DatabaseHelper {
 
   addSleepRecord(record: SleepRecord): void {
     this.sleepList.unshift(record);
+    this.insertSleepToDb(record);
   }
 
   // --- 疫苗记录 CRUD ---
@@ -371,11 +914,24 @@ export class DatabaseHelper {
     return this.vaccineList.filter(r => r.babyId === targetId);
   }
 
-  updateVaccineStatus(id: string, isDone: boolean, date: number): void {
+  updateVaccineStatus(id: string, isDone: number, date?: number): void {
     const item = this.vaccineList.find(v => v.id === id);
     if (item) {
-      item.isDone = isDone ? 1 : 0;
-      item.vaccinatedDate = date;
+      item.isDone = isDone;
+      if (date) item.vaccinatedDate = date;
+      if (this.rdbStore) {
+        try {
+          const pred = new relationalStore.RdbPredicates(AppConstants.TABLE_VACCINE);
+          pred.equalTo('id', id);
+          const bucket: relationalStore.ValuesBucket = {
+            is_done: isDone,
+            vaccinated_date: item.vaccinatedDate
+          };
+          this.rdbStore.update(bucket, pred);
+        } catch (e) {
+          console.warn('updateVaccineStatus error:', JSON.stringify(e));
+        }
+      }
     }
   }
 
@@ -390,6 +946,7 @@ export class DatabaseHelper {
   addGrowthRecord(record: GrowthRecord): void {
     this.growthList.push(record);
     this.growthList.sort((a, b) => a.monthAge - b.monthAge);
+    this.insertGrowthToDb(record);
   }
 
   // --- 花销记账 CRUD ---
@@ -402,15 +959,58 @@ export class DatabaseHelper {
 
   addExpense(expense: ExpenseRecord): void {
     this.expenseList.unshift(expense);
+    this.insertExpenseToDb(expense);
   }
 
   // --- 奶粉库 CRUD ---
   getFormulaProfiles(): FormulaProfile[] {
-    return this.formulaProfiles;
+    return this.formulaProfiles.map((f: FormulaProfile) => new FormulaProfile(
+      f.id,
+      f.stage,
+      f.waterPerScoop,
+      f.defaultAmount,
+      f.brandName,
+      f.isDefault
+    ));
   }
 
   addFormulaProfile(profile: FormulaProfile): void {
+    if (profile.isDefault === 1) {
+      this.formulaProfiles.forEach(f => {
+        f.isDefault = 0;
+      });
+      if (this.rdbStore) {
+        try {
+          this.rdbStore.executeSql(`UPDATE ${AppConstants.TABLE_FORMULA_PROFILE} SET is_default = 0`);
+        } catch (e) {}
+      }
+    }
     this.formulaProfiles.push(profile);
+    this.insertFormulaToDb(profile);
+  }
+
+  /**
+   * 设置唯一常用奶粉（互斥：只能设置一个为常用）
+   */
+  setDefaultFormula(formulaId: string): void {
+    this.formulaProfiles = this.formulaProfiles.map((f: FormulaProfile) => {
+      return new FormulaProfile(
+        f.id,
+        f.stage,
+        f.waterPerScoop,
+        f.defaultAmount,
+        f.brandName,
+        f.id === formulaId ? 1 : 0
+      );
+    });
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`UPDATE ${AppConstants.TABLE_FORMULA_PROFILE} SET is_default = 0`);
+        this.rdbStore.executeSql(`UPDATE ${AppConstants.TABLE_FORMULA_PROFILE} SET is_default = 1 WHERE id = '${formulaId}'`);
+      } catch (e) {
+        console.warn('setDefaultFormula error:', JSON.stringify(e));
+      }
+    }
   }
 
   // --- 数据导出（JSON备份包） ---
@@ -429,5 +1029,51 @@ export class DatabaseHelper {
       'formulas': this.formulaProfiles
     };
     return JSON.stringify(backupObj, null, 2);
+  }
+
+  /**
+   * 清除所有本地记录数据（不可恢复，重置无默认常用）
+   */
+  clearAllData(): void {
+    this.babyList = [];
+    this.currentBabyId = '';
+    this.isUserOnboarded = false;
+    this.cachedBaby = null;
+    this.feedingList = [];
+    this.eliminationList = [];
+    this.sleepList = [];
+    this.growthList = [];
+    this.expenseList = [];
+
+    // 重置所有奶粉常用标记为 0（无默认常用）
+    this.formulaProfiles.forEach(f => {
+      f.isDefault = 0;
+    });
+
+    AppStorage.setOrCreate('CACHE_BABY_INFO', '');
+    AppStorage.setOrCreate('HAS_USER_DATA', false);
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
+
+    if (this.pref) {
+      try {
+        this.pref.clearSync();
+        this.pref.flush();
+      } catch (e) {}
+    }
+
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_BABY}`);
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_FEEDING}`);
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_ELIMINATION}`);
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_SLEEP}`);
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_VACCINE}`);
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_GROWTH}`);
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_EXPENSE}`);
+        this.rdbStore.executeSql(`UPDATE ${AppConstants.TABLE_FORMULA_PROFILE} SET is_default = 0`);
+      } catch (err) {
+        console.warn('clearAllData sql error:', JSON.stringify(err));
+      }
+    }
   }
 }

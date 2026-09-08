@@ -172,7 +172,7 @@ export struct RecordHubPage {
                 .selectedColor(AppConstants.COLOR_SUCCESS)
                 .onChange((checked: boolean) => {
                   const db = DatabaseHelper.getInstance();
-                  db.updateVaccineStatus(item.id, checked, Date.now());
+                  db.updateVaccineStatus(item.id, checked ? 1 : 0, Date.now());
                   this.refreshVaccines();
                 })
 

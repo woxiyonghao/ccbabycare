@@ -29,6 +29,10 @@ struct Index {
     { index: 4, icon: '⚙️', title: '档案' }
   ];
 
+  onPageShow(): void {
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
+  }
+
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
       // 内容区域：使用 Tabs 配合隐藏原生底栏

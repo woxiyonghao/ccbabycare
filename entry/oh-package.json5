@@ -6,7 +6,8 @@
   "author": "",
   "license": "",
   "dependencies": {
-    "@ohos/lottie": "^2.0.33"
+    "@ohos/lottie": "^2.0.33",
+    "@ibestservices/ibest-ui": "2.1.2"
   },
   "devDependencies": {},
   "dynamicDependencies": {}

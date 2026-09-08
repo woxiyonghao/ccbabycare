@@ -12,6 +12,7 @@ import { FeedingRecordDialog } from '../record/FeedingRecordDialog';
 import { EliminationRecordDialog } from '../record/EliminationRecordDialog';
 import { SleepRecordDialog } from '../record/SleepRecordDialog';
 import { GrowthRecordDialog } from '../record/GrowthRecordDialog';
+import { ArrowIcon } from '../../common/components/ArrowIcon';
 
 /**
  * 首页：今日概览 + 3秒极速记录入口 + 今日时间轴流水
@@ -27,6 +28,8 @@ export struct HomePage {
   @State todaySleepMinutes: number = 0;
   @State lastFeedElapsed: string = '刚刚';
   @State currentCaregiverId: string = 'MOM';
+  @StorageProp('APP_REFRESH_TRIGGER') @Watch('refreshData') refreshTrigger: number = 0;
+  @StorageProp('CACHE_BABY_INFO') @Watch('onBabyCacheChanged') cachedBabyJson: string = '';
 
   // 弹窗控制器
   private feedingDialogController: CustomDialogController = new CustomDialogController({
@@ -73,12 +76,59 @@ export struct HomePage {
   });
 
   aboutToAppear() {
+    // 1. 优先从内存极速缓存中瞬时恢复宝宝数据，保障主页0延迟无闪烁
+    this.restoreBabyFromCache();
+    // 2. 刷新最新流水统计
     this.refreshData();
+  }
+
+  private restoreBabyFromCache(): void {
+    if (this.cachedBabyJson) {
+      this.parseBabyFromJson(this.cachedBabyJson);
+      return;
+    }
+    const cached = DatabaseHelper.getInstance().getCachedBaby();
+    if (cached && cached.name) {
+      this.currentBaby = cached;
+    }
+  }
+
+  private onBabyCacheChanged(): void {
+    if (this.cachedBabyJson) {
+      this.parseBabyFromJson(this.cachedBabyJson);
+    }
+  }
+
+  private parseBabyFromJson(jsonStr: string): void {
+    try {
+      const parsed = JSON.parse(jsonStr) as Record<string, Object>;
+      const b = new BabyModel(
+        (parsed['id'] as string) || '',
+        (parsed['name'] as string) || '',
+        (parsed['birthday'] as number) || 0,
+        (parsed['gender'] as string) || 'boy',
+        (parsed['birthWeight'] !== undefined && parsed['birthWeight'] !== null ? (parsed['birthWeight'] as number) : 0),
+        (parsed['birthHeight'] !== undefined && parsed['birthHeight'] !== null ? (parsed['birthHeight'] as number) : 0),
+        (parsed['bloodType'] as string) || '未知',
+        (parsed['avatar'] as string) || '👶',
+        (parsed['notes'] as string) || '',
+        (parsed['isDefault'] as number) || 1,
+        (parsed['createdAt'] as number) || Date.now()
+      );
+      if (b.name) {
+        this.currentBaby = b;
+      }
+    } catch (e) {}
   }
 
   public refreshData(): void {
     const db = DatabaseHelper.getInstance();
-    this.currentBaby = db.getCurrentBaby();
+    const cached = db.getCachedBaby();
+    if (cached && cached.name) {
+      this.currentBaby = cached;
+    } else {
+      this.currentBaby = db.getCurrentBaby();
+    }
 
     const feedings = db.getFeedingRecords();
     const elims = db.getEliminationRecords();
@@ -282,9 +332,13 @@ export struct HomePage {
             .fontWeight(FontWeight.Bold)
             .fontColor(AppConstants.COLOR_PRIMARY)
           Blank()
-          Text('今日喂养概况 >')
-            .fontSize(11)
-            .fontColor(AppConstants.COLOR_TEXT_MUTED)
+          Row({ space: 3 }) {
+            Text('今日喂养概况')
+              .fontSize(11)
+              .fontColor(AppConstants.COLOR_TEXT_MUTED)
+            ArrowIcon({ arrowDirection: 'right', variant: 'gray', iconSize: 11 })
+          }
+          .alignItems(VerticalAlign.Center)
         }
         .width('100%')
 
@@ -413,9 +467,13 @@ export struct HomePage {
           .fontWeight(FontWeight.Bold)
           .fontColor(AppConstants.COLOR_TEXT_MAIN)
         Blank()
-        Text('全部流水 >')
-          .fontSize(12)
-          .fontColor(AppConstants.COLOR_PRIMARY)
+        Row({ space: 3 }) {
+          Text('全部流水')
+            .fontSize(12)
+            .fontColor(AppConstants.COLOR_PRIMARY)
+          ArrowIcon({ arrowDirection: 'right', variant: 'orange', iconSize: 11 })
+        }
+        .alignItems(VerticalAlign.Center)
       }
       .width('94%')
       .padding({ top: 10, bottom: 6 })

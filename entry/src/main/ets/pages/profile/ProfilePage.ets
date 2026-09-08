@@ -1,27 +1,46 @@
+import router from '@ohos.router';
+import promptAction from '@ohos.promptAction';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { DatabaseHelper } from '../../common/database/DatabaseHelper';
 import { BabyModel } from '../../common/models/BabyModel';
 import { FormulaProfile } from '../../common/models/FormulaProfile';
+import { ArrowIcon } from '../../common/components/ArrowIcon';
+import { AddFormulaDialog } from './AddFormulaDialog';
 
 /**
- * 档案与设置页：宝宝档案切换、奶粉库、离线全量数据备份/导出、隐私关于
+ * 档案与设置页：宝宝档案修改、奶粉库配比快速添加、隐私政策、清除所有数据
  */
 @Component
 export struct ProfilePage {
   @State babies: BabyModel[] = [];
   @State currentBaby: BabyModel = new BabyModel();
   @State formulas: FormulaProfile[] = [];
-  @State exportStatusMsg: string = '';
+  @State currentDefaultFormulaId: string = '';
+  @StorageProp('APP_REFRESH_TRIGGER') @Watch('refreshData') refreshTrigger: number = 0;
+
+  // 新增奶粉配比弹窗
+  private addFormulaDialogController: CustomDialogController = new CustomDialogController({
+    builder: AddFormulaDialog({
+      onSuccess: () => {
+        this.refreshData();
+      }
+    }),
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
 
   aboutToAppear() {
     this.refreshData();
   }
 
-  private refreshData() {
+  public refreshData(): void {
     const db = DatabaseHelper.getInstance();
     this.babies = db.getBabies();
     this.currentBaby = db.getCurrentBaby();
-    this.formulas = db.getFormulaProfiles();
+    const list = db.getFormulaProfiles();
+    this.formulas = [...list];
+    const def = list.find((f: FormulaProfile) => f.isDefault === 1);
+    this.currentDefaultFormulaId = def ? def.id : '';
   }
 
   build() {
@@ -38,7 +57,7 @@ export struct ProfilePage {
 
       Scroll() {
         Column({ space: 14 }) {
-          // 1. 当前宝宝档案卡
+          // 1. 当前宝宝档案卡（支持右上角独立页面编辑，无左侧符号）
           Column({ space: 8 }) {
             Row({ space: 12 }) {
               Text(this.currentBaby.avatar || '👶')
@@ -58,12 +77,28 @@ export struct ProfilePage {
                 Text(`当前月龄：${this.currentBaby.getAgeString()}`)
                   .fontSize(12)
                   .fontColor(AppConstants.COLOR_PRIMARY)
-                Text(`出生信息：${this.currentBaby.birthWeight}kg · ${this.currentBaby.birthHeight}cm · ${this.currentBaby.bloodType}型血`)
+                Text(`出生信息：${this.currentBaby.birthWeight > 0 ? this.currentBaby.birthWeight + 'kg' : '--'} · ${this.currentBaby.birthHeight > 0 ? this.currentBaby.birthHeight + 'cm' : '--'} · ${this.currentBaby.bloodType && this.currentBaby.bloodType !== '未知' ? this.currentBaby.bloodType + '型血' : '血型未填'}`)
                   .fontSize(11)
                   .fontColor(AppConstants.COLOR_TEXT_MUTED)
               }
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
+
+              // 截图5 & 用户要求：编辑按钮单独page，且无左侧符号
+              Button('编辑')
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(AppConstants.COLOR_PRIMARY)
+                .backgroundColor(AppConstants.COLOR_PRIMARY_LIGHT)
+                .height(28)
+                .padding({ left: 14, right: 14 })
+                .borderRadius(14)
+                .onClick(() => {
+                  router.pushUrl({
+                    url: 'pages/profile/EditBabyProfilePage',
+                    params: { isFirstSetup: false }
+                  });
+                })
             }
             .width('100%')
           }
@@ -73,7 +108,7 @@ export struct ProfilePage {
           .borderRadius(16)
           .border({ width: 1, color: AppConstants.COLOR_BORDER })
 
-          // 2. 奶粉库设置卡片（P0配套）
+          // 2. 奶粉库设置卡片（常用只能设置一个 + 右上角+图标快速添加）
           Column({ space: 10 }) {
             Row() {
               Text('🍼 奶粉库设置')
@@ -81,9 +116,19 @@ export struct ProfilePage {
                 .fontWeight(FontWeight.Bold)
                 .fontColor(AppConstants.COLOR_TEXT_MAIN)
               Blank()
-              Text('快捷段位与配比')
-                .fontSize(11)
-                .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              // 右上角 + 快速添加
+              Button({ type: ButtonType.Normal }) {
+                Image($r('app.media.ic_plus'))
+                  .width(13)
+                  .height(13)
+              }
+              .width(28)
+              .height(28)
+              .backgroundColor(AppConstants.COLOR_PRIMARY_LIGHT)
+              .borderRadius(14)
+              .onClick(() => {
+                this.addFormulaDialogController.open();
+              })
             }
             .width('100%')
 
@@ -99,16 +144,41 @@ export struct ProfilePage {
                     .fontColor(AppConstants.COLOR_TEXT_MUTED)
                 }
                 .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+
                 Blank()
-                Text('常用 ✓')
-                  .fontSize(12)
-                  .fontColor(AppConstants.COLOR_SUCCESS)
+
+                // 用户要求：不要有默认，只有用户主动设为常用后才高亮，且全局只能设置一个
+                if (this.currentDefaultFormulaId !== '' && this.currentDefaultFormulaId === item.id) {
+                  Text('常用 ✓')
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(AppConstants.COLOR_SUCCESS)
+                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                    .backgroundColor(AppConstants.COLOR_SUCCESS_LIGHT)
+                    .borderRadius(8)
+                } else {
+                  Text('设为常用')
+                    .fontSize(11)
+                    .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                    .backgroundColor('#F3F4F6')
+                    .borderRadius(8)
+                    .onClick(() => {
+                      this.currentDefaultFormulaId = item.id;
+                      DatabaseHelper.getInstance().setDefaultFormula(item.id);
+                      this.refreshData();
+                      try {
+                        promptAction.showToast({ message: `已将 ${item.stage} 设为常用` });
+                      } catch (e) {}
+                    })
+                }
               }
               .width('100%')
               .padding(10)
               .backgroundColor('#FFFBF5')
               .borderRadius(10)
-            }, (item: FormulaProfile) => item.id)
+            }, (item: FormulaProfile) => `${item.id}_${item.isDefault}_${this.currentDefaultFormulaId}`)
           }
           .width('100%')
           .padding(14)
@@ -116,82 +186,63 @@ export struct ProfilePage {
           .borderRadius(16)
           .border({ width: 1, color: AppConstants.COLOR_BORDER })
 
-          // 3. 离线数据备份与导出（P0）
-          Column({ space: 10 }) {
-            Row() {
-              Text('💾 本地数据备份与导出')
-                .fontSize(15)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(AppConstants.COLOR_TEXT_MAIN)
-              Blank()
-              Text('完全离线存储')
-                .fontSize(11)
-                .fontColor(AppConstants.COLOR_SUCCESS)
-            }
-            .width('100%')
-
-            Text('所有数据均保存在您手机本地沙盒中，不上传任何云端服务器。您可以一键导出备份文件，通过文件面板分享或保存，杜绝隐私泄露。')
-              .fontSize(12)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-              .lineHeight(18)
-
+          // 3. 隐私政策卡片（点击跳转独立 PrivacyPolicyPage）
+          Row() {
             Row({ space: 10 }) {
-              Button('导出全量数据 (JSON)')
-                .layoutWeight(1)
-                .height(38)
-                .fontSize(13)
-                .fontWeight(FontWeight.Bold)
-                .backgroundColor(AppConstants.COLOR_PRIMARY)
-                .onClick(() => {
-                  const db = DatabaseHelper.getInstance();
-                  const jsonStr = db.exportAllDataJson();
-                  this.exportStatusMsg = `✅ 已成功生成全量离线备份包 (共计 ${jsonStr.length} 字符)`;
-                })
-
-              Button('恢复备份数据')
-                .layoutWeight(1)
-                .height(38)
-                .fontSize(13)
-                .fontWeight(FontWeight.Normal)
-                .backgroundColor('#F3F4F6')
-                .fontColor(AppConstants.COLOR_TEXT_MAIN)
-                .onClick(() => {
-                  this.exportStatusMsg = 'ℹ️ 请通过系统文件面板选择 .json 备份文件进行覆盖或合并恢复';
-                })
+              Text('🛡️')
+                .fontSize(22)
+              Column({ space: 3 }) {
+                Text('隐私政策')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(AppConstants.COLOR_TEXT_MAIN)
+                Text('纯本地离线运行与零敏感权限保护承诺')
+                  .fontSize(11)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              .alignItems(HorizontalAlign.Start)
             }
-            .width('100%')
-
-            if (this.exportStatusMsg) {
-              Text(this.exportStatusMsg)
-                .fontSize(12)
-                .fontColor(AppConstants.COLOR_PRIMARY)
-                .padding(8)
-                .backgroundColor(AppConstants.COLOR_PRIMARY_LIGHT)
-                .borderRadius(8)
-                .width('100%')
-            }
+            Blank()
+            ArrowIcon({ arrowDirection: 'right', variant: 'gray', iconSize: 14 })
           }
           .width('100%')
-          .padding(14)
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
           .backgroundColor(AppConstants.COLOR_CARD_BG)
           .borderRadius(16)
           .border({ width: 1, color: AppConstants.COLOR_BORDER })
+          .onClick(() => {
+            router.pushUrl({
+              url: 'pages/privacy/PrivacyPolicyPage'
+            });
+          })
 
-          // 4. 隐私安全与关于
-          Column({ space: 6 }) {
-            Text('🔒 隐私与权限承诺')
-              .fontSize(14)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(AppConstants.COLOR_TEXT_MAIN)
-            Text('• 零敏感权限申请：不索取通讯录、位置、外部存储、电话等权限。\n• 零网络依赖：全流程断网可用。\n• 零账号登录：免去手机号与注册烦恼，打开即用。')
-              .fontSize(12)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-              .lineHeight(18)
+          // 4. 清除所有数据卡片（整行点击触发弹窗 + 先toast提示）
+          Row() {
+            Row({ space: 10 }) {
+              Text('🗑️')
+                .fontSize(22)
+              Column({ space: 3 }) {
+                Text('清除所有数据')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(AppConstants.COLOR_DANGER)
+                Text('彻底清空所有本地记录，清理后不可恢复')
+                  .fontSize(11)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              .alignItems(HorizontalAlign.Start)
+            }
+            Blank()
+            ArrowIcon({ arrowDirection: 'right', variant: 'gray', iconSize: 14 })
           }
           .width('100%')
-          .padding(14)
-          .backgroundColor('#F7FAFC')
-          .borderRadius(14)
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+          .backgroundColor(AppConstants.COLOR_CARD_BG)
+          .borderRadius(16)
+          .border({ width: 1, color: AppConstants.COLOR_BORDER })
+          .onClick(() => {
+            this.showClearConfirmDialog();
+          })
         }
         .width('94%')
         .padding({ bottom: 40 })
@@ -203,5 +254,38 @@ export struct ProfilePage {
     .width('100%')
     .height('100%')
     .backgroundColor(AppConstants.COLOR_BG_CREAM)
+  }
+
+  /**
+   * 弹窗确认是否清除所有数据，点击确认先 toast 提示，然后彻底清理本地数据
+   */
+  private showClearConfirmDialog(): void {
+    AlertDialog.show({
+      title: '清除所有数据',
+      message: '确定要清除所有本地数据吗？此操作将清空所有喂养、排便、睡眠、生长及花销记录，清理后不可恢复！',
+      primaryButton: {
+        value: '取消',
+        action: () => {}
+      },
+      secondaryButton: {
+        value: '确认清除',
+        fontColor: AppConstants.COLOR_DANGER,
+        action: () => {
+          // 点击确认先toast一下
+          try {
+            promptAction.showToast({
+              message: '数据已全部清空，请重新设置宝宝档案',
+              duration: 2000
+            });
+          } catch (err) {}
+          DatabaseHelper.getInstance().clearAllData();
+          this.refreshData();
+          router.replaceUrl({
+            url: 'pages/profile/EditBabyProfilePage',
+            params: { isFirstSetup: true }
+          });
+        }
+      }
+    });
   }
 }
