@@ -3,6 +3,8 @@ import { GrowthRecord } from '../../common/models/GrowthRecord';
 import { DatabaseHelper } from '../../common/database/DatabaseHelper';
 import { GrowthEvaluator, EvaluationResult } from '../../common/utils/GrowthEvaluator';
 
+import promptAction from '@ohos.promptAction';
+
 /**
  * 成长体检记录弹窗（结合2026儿童生长发育标准实时比对，图三规则）
  */
@@ -11,10 +13,10 @@ export struct GrowthRecordDialog {
   controller: CustomDialogController;
   onSuccess?: () => void;
 
-  @State heightStr: string = '62.5';
-  @State weightStr: string = '6.8';
-  @State headCircStr: string = '40.5';
-  @State evaluationSummary: string = '正在比对2026儿童发育标准...';
+  @State heightStr: string = '';
+  @State weightStr: string = '';
+  @State headCircStr: string = '';
+  @State evaluationSummary: string = '请输入身高与体重，系统将实时比对2026标准';
   @State isNormal: boolean = true;
   @State location: string = '家庭测量';
   @State notes: string = '';
@@ -23,12 +25,40 @@ export struct GrowthRecordDialog {
     this.updateEvaluation();
   }
 
+  /**
+   * 过滤并净化输入的数字（禁止负号、非数字，规范小数点与前导零）
+   */
+  private sanitizeNumber(val: string): string {
+    if (!val) return '';
+    let clean = val.replace(/[^0-9.]/g, '');
+    if (clean.startsWith('.')) {
+      clean = '0' + clean;
+    }
+    const dotIndex = clean.indexOf('.');
+    if (dotIndex !== -1) {
+      const intPart = clean.substring(0, dotIndex);
+      const decPart = clean.substring(dotIndex + 1).replace(/\./g, '');
+      clean = intPart + '.' + decPart.substring(0, 2);
+    }
+    if (clean.length > 1 && clean.startsWith('0') && !clean.startsWith('0.')) {
+      clean = clean.replace(/^0+/, '');
+      if (clean === '') clean = '0';
+    }
+    return clean;
+  }
+
   private updateEvaluation() {
     const db = DatabaseHelper.getInstance();
     const baby = db.getCurrentBaby();
-    const h = parseFloat(this.heightStr) || 0;
-    const w = parseFloat(this.weightStr) || 0;
+    const h = parseFloat(this.heightStr);
+    const w = parseFloat(this.weightStr);
     const monthAge = baby.getTotalMonthAge();
+
+    if (!this.heightStr || !this.weightStr || isNaN(h) || isNaN(w) || h <= 0 || w <= 0) {
+      this.evaluationSummary = '请输入身高与体重，系统将实时比对2026标准';
+      this.isNormal = true;
+      return;
+    }
 
     const result: EvaluationResult = GrowthEvaluator.evaluate(baby.gender, monthAge, h, w);
     this.evaluationSummary = result.summaryText;
@@ -75,9 +105,10 @@ export struct GrowthRecordDialog {
             .fontSize(12)
             .fontColor(AppConstants.COLOR_TEXT_MUTED)
           TextInput({ text: this.heightStr })
-            .type(InputType.Number)
+            .type(InputType.NUMBER_DECIMAL)
+            .inputFilter('[0-9.]')
             .onChange((v: string) => {
-              this.heightStr = v;
+              this.heightStr = this.sanitizeNumber(v);
               this.updateEvaluation();
             })
         }
@@ -88,9 +119,10 @@ export struct GrowthRecordDialog {
             .fontSize(12)
             .fontColor(AppConstants.COLOR_TEXT_MUTED)
           TextInput({ text: this.weightStr })
-            .type(InputType.Number)
+            .type(InputType.NUMBER_DECIMAL)
+            .inputFilter('[0-9.]')
             .onChange((v: string) => {
-              this.weightStr = v;
+              this.weightStr = this.sanitizeNumber(v);
               this.updateEvaluation();
             })
         }
@@ -101,8 +133,11 @@ export struct GrowthRecordDialog {
             .fontSize(12)
             .fontColor(AppConstants.COLOR_TEXT_MUTED)
           TextInput({ text: this.headCircStr })
-            .type(InputType.Number)
-            .onChange((v: string) => { this.headCircStr = v; })
+            .type(InputType.NUMBER_DECIMAL)
+            .inputFilter('[0-9.]')
+            .onChange((v: string) => {
+              this.headCircStr = this.sanitizeNumber(v);
+            })
         }
         .layoutWeight(1)
       }
@@ -144,10 +179,17 @@ export struct GrowthRecordDialog {
         .fontWeight(FontWeight.Bold)
         .backgroundColor(AppConstants.COLOR_PRIMARY)
         .onClick(() => {
+          const h = parseFloat(this.heightStr);
+          const w = parseFloat(this.weightStr);
+          if (!this.heightStr || !this.weightStr || isNaN(h) || isNaN(w) || h <= 0 || w <= 0) {
+            try {
+              promptAction.showToast({ message: '请输入有效的身长与体重数值' });
+            } catch (e) {}
+            return;
+          }
+
           const db = DatabaseHelper.getInstance();
           const baby = db.getCurrentBaby();
-          const h = parseFloat(this.heightStr) || 0;
-          const w = parseFloat(this.weightStr) || 0;
           const head = parseFloat(this.headCircStr) || 0;
           const monthAge = baby.getTotalMonthAge();
 

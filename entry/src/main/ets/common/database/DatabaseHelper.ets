@@ -11,6 +11,25 @@ import { GrowthRecord } from '../models/GrowthRecord';
 import { ExpenseRecord } from '../models/ExpenseRecord';
 import { FormulaProfile } from '../models/FormulaProfile';
 
+export interface RoutineItem {
+  id: string;
+  babyId: string;
+  time: string;
+  emoji: string;
+  title: string;
+  notes: string;
+  colorTheme: string;
+  createdAt: number;
+}
+
+export interface ParentsMessageItem {
+  id: string;
+  babyId: string;
+  content: string;
+  signature: string;
+  createdAt: number;
+}
+
 /**
  * 本地关系型数据库（RdbStore / SQLite）与 Preferences 极速缓存单例管理器
  * 实现真实的本地 SQLite 持久化存储与极速内存缓存秒开同步
@@ -33,6 +52,8 @@ export class DatabaseHelper {
   private growthList: GrowthRecord[] = [];
   private expenseList: ExpenseRecord[] = [];
   private formulaProfiles: FormulaProfile[] = [];
+  private routineList: RoutineItem[] = [];
+  private parentsMessageList: ParentsMessageItem[] = [];
 
   private constructor() {
     this.initReferenceDataInMemory();
@@ -77,6 +98,23 @@ export class DatabaseHelper {
           AppStorage.setOrCreate('CACHE_BABY_INFO', cachedBabyStr);
         } catch (e) {}
       }
+
+      // 恢复作息安排缓存
+      const routinesStr = await this.pref.get('ROUTINES_DATA', '') as string;
+      if (routinesStr) {
+        try {
+          this.routineList = JSON.parse(routinesStr) as RoutineItem[];
+        } catch (e) {}
+      }
+
+      // 恢复父母寄语缓存
+      const messagesStr = await this.pref.get('PARENTS_MESSAGES_DATA', '') as string;
+      if (messagesStr) {
+        try {
+          this.parentsMessageList = JSON.parse(messagesStr) as ParentsMessageItem[];
+        } catch (e) {}
+      }
+
       this.isUserOnboarded = hasUserPref;
       AppStorage.setOrCreate('HAS_USER_DATA', hasUserPref);
     } catch (e) {
@@ -957,6 +995,76 @@ export class DatabaseHelper {
     this.insertExpenseToDb(expense);
   }
 
+  deleteExpense(id: string): void {
+    this.expenseList = this.expenseList.filter(e => e.id !== id);
+    if (this.rdbStore) {
+      const predicates = new relationalStore.RdbPredicates(AppConstants.TABLE_EXPENSE);
+      predicates.equalTo('id', id);
+      this.rdbStore.delete(predicates).catch((e: Object) => {
+        console.warn('deleteExpense error:', JSON.stringify(e));
+      });
+    }
+  }
+
+  // --- 规律作息 CRUD ---
+  getRoutines(babyId?: string): RoutineItem[] {
+    const targetId = babyId || this.currentBabyId;
+    return this.routineList
+      .filter(r => !targetId || !r.babyId || r.babyId === targetId)
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }
+
+  addRoutine(item: RoutineItem): void {
+    this.routineList.push(item);
+    this.routineList.sort((a, b) => a.time.localeCompare(b.time));
+    this.saveRoutinesToPref();
+  }
+
+  deleteRoutine(id: string): void {
+    this.routineList = this.routineList.filter(r => r.id !== id);
+    this.saveRoutinesToPref();
+  }
+
+  private saveRoutinesToPref(): void {
+    if (this.pref) {
+      try {
+        this.pref.putSync('ROUTINES_DATA', JSON.stringify(this.routineList));
+        this.pref.flush();
+      } catch (e) {
+        console.warn('saveRoutinesToPref error:', JSON.stringify(e));
+      }
+    }
+  }
+
+  // --- 父母寄语 CRUD ---
+  getParentsMessages(babyId?: string): ParentsMessageItem[] {
+    const targetId = babyId || this.currentBabyId;
+    return this.parentsMessageList
+      .filter(m => !targetId || !m.babyId || m.babyId === targetId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  addParentsMessage(item: ParentsMessageItem): void {
+    this.parentsMessageList.unshift(item);
+    this.saveParentsMessagesToPref();
+  }
+
+  deleteParentsMessage(id: string): void {
+    this.parentsMessageList = this.parentsMessageList.filter(m => m.id !== id);
+    this.saveParentsMessagesToPref();
+  }
+
+  private saveParentsMessagesToPref(): void {
+    if (this.pref) {
+      try {
+        this.pref.putSync('PARENTS_MESSAGES_DATA', JSON.stringify(this.parentsMessageList));
+        this.pref.flush();
+      } catch (e) {
+        console.warn('saveParentsMessagesToPref error:', JSON.stringify(e));
+      }
+    }
+  }
+
   // --- 奶粉库 CRUD ---
   getFormulaProfiles(): FormulaProfile[] {
     return this.formulaProfiles.map((f: FormulaProfile) => new FormulaProfile(
@@ -1054,6 +1162,8 @@ export class DatabaseHelper {
     this.growthList = [];
     this.expenseList = [];
     this.formulaProfiles = [];
+    this.routineList = [];
+    this.parentsMessageList = [];
 
     AppStorage.setOrCreate('CACHE_BABY_INFO', '');
     AppStorage.setOrCreate('HAS_USER_DATA', false);

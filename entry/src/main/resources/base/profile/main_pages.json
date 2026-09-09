@@ -2,7 +2,8 @@
   "src": [
     "pages/Index",
     "pages/privacy/PrivacyPolicyPage",
-    "pages/profile/EditBabyProfilePage"
+    "pages/profile/EditBabyProfilePage",
+    "pages/statistics/StatisticsPage"
   ]
 }
 

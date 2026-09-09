@@ -64,6 +64,32 @@ struct EditBabyProfilePage {
     }
   }
 
+  /**
+   * 过滤净化数字输入（严禁负号与非数字字符，允许且仅保留一个小数点，支持小数输入）
+   */
+  private sanitizeNumber(val: string): string {
+    if (!val) return '';
+    // 1. 过滤非数字与非小数点（禁止负号 - 、英文字符及符号）
+    let clean = val.replace(/[^0-9.]/g, '');
+    // 2. 开头如果是小数点自动补 0
+    if (clean.startsWith('.')) {
+      clean = '0' + clean;
+    }
+    // 3. 严格限制只能存在一个小数点
+    const dotIndex = clean.indexOf('.');
+    if (dotIndex !== -1) {
+      const intPart = clean.substring(0, dotIndex);
+      const decPart = clean.substring(dotIndex + 1).replace(/\./g, '');
+      clean = intPart + '.' + decPart.substring(0, 2);
+    }
+    // 4. 规范多余前导零（如 "005" -> "5"）
+    if (clean.length > 1 && clean.startsWith('0') && !clean.startsWith('0.')) {
+      clean = clean.replace(/^0+/, '');
+      if (clean === '') clean = '0';
+    }
+    return clean;
+  }
+
   private handleSave(): void {
     const trimmedName = this.name.trim();
     if (!trimmedName) {
@@ -263,7 +289,7 @@ struct EditBabyProfilePage {
             .width('100%')
             .alignItems(HorizontalAlign.Start)
 
-            // 出生体重与身长
+            // 出生体重与身长（支持正数与小数输入）
             Row({ space: 12 }) {
               Column({ space: 6 }) {
                 Text('出生体重 (kg)')
@@ -272,11 +298,12 @@ struct EditBabyProfilePage {
                 TextInput({ text: this.birthWeightStr, placeholder: '如 3.3' })
                   .height(42)
                   .fontSize(14)
-                  .type(InputType.Number)
+                  .type(InputType.NUMBER_DECIMAL)
+                  .inputFilter('[0-9.]')
                   .backgroundColor('#F7FAFC')
                   .borderRadius(10)
                   .onChange((v: string) => {
-                    this.birthWeightStr = v;
+                    this.birthWeightStr = this.sanitizeNumber(v);
                   })
               }
               .layoutWeight(1)
@@ -289,11 +316,12 @@ struct EditBabyProfilePage {
                 TextInput({ text: this.birthHeightStr, placeholder: '如 50.0' })
                   .height(42)
                   .fontSize(14)
-                  .type(InputType.Number)
+                  .type(InputType.NUMBER_DECIMAL)
+                  .inputFilter('[0-9.]')
                   .backgroundColor('#F7FAFC')
                   .borderRadius(10)
                   .onChange((v: string) => {
-                    this.birthHeightStr = v;
+                    this.birthHeightStr = this.sanitizeNumber(v);
                   })
               }
               .layoutWeight(1)

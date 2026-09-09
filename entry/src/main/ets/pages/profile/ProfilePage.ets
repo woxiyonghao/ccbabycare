@@ -188,17 +188,13 @@ export struct ProfilePage {
                       })
                   }
 
-                  // 支持删除奶粉段位
+                  // 支持删除奶粉段位（弹窗二次确认）
                   Text('✕')
                     .fontSize(12)
                     .fontColor(AppConstants.COLOR_TEXT_MUTED)
                     .padding({ left: 8, right: 4, top: 4, bottom: 4 })
                     .onClick(() => {
-                      DatabaseHelper.getInstance().deleteFormulaProfile(item.id);
-                      this.refreshData();
-                      try {
-                        promptAction.showToast({ message: '已删除该奶粉配置' });
-                      } catch (e) {}
+                      this.showDeleteFormulaConfirmDialog(item);
                     })
                 }
                 .width('100%')
@@ -214,7 +210,37 @@ export struct ProfilePage {
           .borderRadius(16)
           .border({ width: 1, color: AppConstants.COLOR_BORDER })
 
-          // 3. 隐私政策卡片（点击跳转独立 PrivacyPolicyPage）
+          // 3. 成长与健康统计卡片（点击跳转独立 StatisticsPage）
+          Row() {
+            Row({ space: 10 }) {
+              Text('📈')
+                .fontSize(22)
+              Column({ space: 3 }) {
+                Text('成长与健康统计')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(AppConstants.COLOR_TEXT_MAIN)
+                Text('2026儿童身高体重标准对照、达标测算与曲线')
+                  .fontSize(11)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              .alignItems(HorizontalAlign.Start)
+            }
+            Blank()
+            ArrowIcon({ arrowDirection: 'right', variant: 'gray', iconSize: 14 })
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+          .backgroundColor(AppConstants.COLOR_CARD_BG)
+          .borderRadius(16)
+          .border({ width: 1, color: AppConstants.COLOR_BORDER })
+          .onClick(() => {
+            router.pushUrl({
+              url: 'pages/statistics/StatisticsPage'
+            });
+          })
+
+          // 4. 隐私政策卡片（点击跳转独立 PrivacyPolicyPage）
           Row() {
             Row({ space: 10 }) {
               Text('🛡️')
@@ -282,6 +308,31 @@ export struct ProfilePage {
     .width('100%')
     .height('100%')
     .backgroundColor(AppConstants.COLOR_BG_CREAM)
+  }
+
+  /**
+   * 弹窗确认是否删除奶粉段位配置
+   */
+  private showDeleteFormulaConfirmDialog(item: FormulaProfile): void {
+    AlertDialog.show({
+      title: '删除奶粉配置',
+      message: `确定要删除「${item.stage}」的奶粉配置吗？删除后不可撤回。`,
+      primaryButton: {
+        value: '取消',
+        action: () => {}
+      },
+      secondaryButton: {
+        value: '确认删除',
+        fontColor: AppConstants.COLOR_DANGER,
+        action: () => {
+          DatabaseHelper.getInstance().deleteFormulaProfile(item.id);
+          this.refreshData();
+          try {
+            promptAction.showToast({ message: `已删除「${item.stage}」配置` });
+          } catch (e) {}
+        }
+      }
+    });
   }
 
   /**

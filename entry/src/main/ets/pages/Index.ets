@@ -2,7 +2,6 @@ import { AppConstants } from '../common/constants/AppConstants';
 import { HomePage } from './home/HomePage';
 import { RecordHubPage } from './record/RecordHubPage';
 import { DiaryBookPage } from './diary/DiaryBookPage';
-import { StatisticsPage } from './statistics/StatisticsPage';
 import { ProfilePage } from './profile/ProfilePage';
 
 interface TabItemConfig {
@@ -12,7 +11,7 @@ interface TabItemConfig {
 }
 
 /**
- * 主程序入口：五大核心导航
+ * 主程序入口：四大核心导航（首页、记录、日记本、档案）
  * 底部采用类似华为相册的悬浮毛玻璃胶囊风格（保持萌宝暖橙主色调）
  */
 @Entry
@@ -25,8 +24,7 @@ struct Index {
     { index: 0, icon: '🍼', title: '首页' },
     { index: 1, icon: '📝', title: '记录' },
     { index: 2, icon: '📖', title: '日记本' },
-    { index: 3, icon: '📈', title: '成长' },
-    { index: 4, icon: '⚙️', title: '档案' }
+    { index: 3, icon: '⚙️', title: '档案' }
   ];
 
   onPageShow(): void {
@@ -47,10 +45,6 @@ struct Index {
 
         TabContent() {
           DiaryBookPage()
-        }
-
-        TabContent() {
-          StatisticsPage()
         }
 
         TabContent() {
