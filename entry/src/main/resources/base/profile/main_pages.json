@@ -3,7 +3,8 @@
     "pages/Index",
     "pages/privacy/PrivacyPolicyPage",
     "pages/profile/EditBabyProfilePage",
-    "pages/statistics/StatisticsPage"
+    "pages/statistics/StatisticsPage",
+    "pages/record/CategorySortPage"
   ]
 }
 

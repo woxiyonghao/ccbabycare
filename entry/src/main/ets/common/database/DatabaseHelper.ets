@@ -10,6 +10,7 @@ import { VaccineRecord } from '../models/VaccineRecord';
 import { GrowthRecord } from '../models/GrowthRecord';
 import { ExpenseRecord } from '../models/ExpenseRecord';
 import { FormulaProfile } from '../models/FormulaProfile';
+import { DEFAULT_CATEGORY_KEYS } from '../models/RecordCategoryItem';
 
 export interface RoutineItem {
   id: string;
@@ -54,6 +55,7 @@ export class DatabaseHelper {
   private formulaProfiles: FormulaProfile[] = [];
   private routineList: RoutineItem[] = [];
   private parentsMessageList: ParentsMessageItem[] = [];
+  private categoryOrder: string[] = [...DEFAULT_CATEGORY_KEYS];
 
   private constructor() {
     this.initReferenceDataInMemory();
@@ -112,6 +114,23 @@ export class DatabaseHelper {
       if (messagesStr) {
         try {
           this.parentsMessageList = JSON.parse(messagesStr) as ParentsMessageItem[];
+        } catch (e) {}
+      }
+
+      // 恢复自定义分类排序
+      const orderStr = await this.pref.get('CATEGORY_ORDER', '') as string;
+      if (orderStr) {
+        try {
+          const list = JSON.parse(orderStr) as string[];
+          if (Array.isArray(list) && list.length > 0) {
+            const validList = list.filter((k: string) => DEFAULT_CATEGORY_KEYS.includes(k));
+            for (let i = 0; i < DEFAULT_CATEGORY_KEYS.length; i++) {
+              if (!validList.includes(DEFAULT_CATEGORY_KEYS[i])) {
+                validList.push(DEFAULT_CATEGORY_KEYS[i]);
+              }
+            }
+            this.categoryOrder = validList;
+          }
         } catch (e) {}
       }
 
@@ -944,7 +963,10 @@ export class DatabaseHelper {
   // --- 疫苗记录 CRUD ---
   getVaccineRecords(babyId?: string): VaccineRecord[] {
     const targetId = babyId || this.currentBabyId;
-    return this.vaccineList.filter(r => r.babyId === targetId);
+    if (this.vaccineList.length === 0) {
+      this.initReferenceDataInMemory();
+    }
+    return this.vaccineList.filter(r => !r.babyId || !targetId || r.babyId === targetId);
   }
 
   updateVaccineStatus(id: string, isDone: number, date?: number): void {
@@ -952,13 +974,17 @@ export class DatabaseHelper {
     if (item) {
       item.isDone = isDone;
       if (date) item.vaccinatedDate = date;
+      if (!item.babyId && this.currentBabyId) {
+        item.babyId = this.currentBabyId;
+      }
       if (this.rdbStore) {
         try {
           const pred = new relationalStore.RdbPredicates(AppConstants.TABLE_VACCINE);
           pred.equalTo('id', id);
           const bucket: relationalStore.ValuesBucket = {
             is_done: isDone,
-            vaccinated_date: item.vaccinatedDate
+            vaccinated_date: item.vaccinatedDate,
+            baby_id: item.babyId
           };
           this.rdbStore.update(bucket, pred);
         } catch (e) {
@@ -1065,6 +1091,28 @@ export class DatabaseHelper {
     }
   }
 
+  // --- 分类排序 CRUD ---
+  getCategoryOrder(): string[] {
+    return [...this.categoryOrder];
+  }
+
+  saveCategoryOrder(order: string[]): void {
+    this.categoryOrder = [...order];
+    if (this.pref) {
+      try {
+        this.pref.putSync('CATEGORY_ORDER', JSON.stringify(this.categoryOrder));
+        this.pref.flush();
+      } catch (e) {
+        console.warn('saveCategoryOrder error:', JSON.stringify(e));
+      }
+    }
+    AppStorage.setOrCreate('CATEGORY_ORDER_TRIGGER', Date.now());
+  }
+
+  resetCategoryOrder(): void {
+    this.saveCategoryOrder(DEFAULT_CATEGORY_KEYS);
+  }
+
   // --- 奶粉库 CRUD ---
   getFormulaProfiles(): FormulaProfile[] {
     return this.formulaProfiles.map((f: FormulaProfile) => new FormulaProfile(
@@ -1164,6 +1212,7 @@ export class DatabaseHelper {
     this.formulaProfiles = [];
     this.routineList = [];
     this.parentsMessageList = [];
+    this.categoryOrder = [...DEFAULT_CATEGORY_KEYS];
 
     AppStorage.setOrCreate('CACHE_BABY_INFO', '');
     AppStorage.setOrCreate('HAS_USER_DATA', false);

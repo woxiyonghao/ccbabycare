@@ -2,7 +2,7 @@ import { CaregiverConstants, CaregiverItem } from '../constants/CaregiverConstan
 import { AppConstants } from '../constants/AppConstants';
 
 /**
- * 照护者角色切换选择器（参考图二手绘日记本角色标签）
+ * 照护者角色切换选择器（均分单排自适应，彻底杜绝横向撑出与折行）
  */
 @Component
 export struct CaregiverPicker {
@@ -10,18 +10,21 @@ export struct CaregiverPicker {
   onRoleChanged?: (roleId: string) => void;
 
   build() {
-    Row({ space: 8 }) {
+    Row({ space: 6 }) {
       ForEach(CaregiverConstants.DEFAULT_ROLES, (item: CaregiverItem) => {
-        Row({ space: 4 }) {
+        Row({ space: 3 }) {
           Text(item.avatarIcon)
-            .fontSize(14)
+            .fontSize(13)
           Text(item.name)
-            .fontSize(12)
+            .fontSize(11)
             .fontWeight(this.selectedRoleId === item.id ? FontWeight.Bold : FontWeight.Normal)
             .fontColor(this.selectedRoleId === item.id ? AppConstants.COLOR_PRIMARY : AppConstants.COLOR_TEXT_MUTED)
+            .maxLines(1)
         }
-        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-        .backgroundColor(this.selectedRoleId === item.id ? AppConstants.COLOR_PRIMARY_LIGHT : '#F3F4F6')
+        .layoutWeight(1)
+        .height(32)
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor(this.selectedRoleId === item.id ? '#FFF0EB' : '#F3F4F6')
         .borderRadius(16)
         .border({
           width: 1,
@@ -36,6 +39,6 @@ export struct CaregiverPicker {
       }, (item: CaregiverItem) => item.id)
     }
     .width('100%')
-    .padding({ top: 4, bottom: 4 })
+    .padding({ top: 2, bottom: 2 })
   }
 }
