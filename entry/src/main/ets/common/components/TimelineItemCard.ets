@@ -26,6 +26,11 @@ export struct TimelineItemCard {
     Row({ space: 12 }) {
       // 左侧时间戳
       Column({ space: 2 }) {
+        if (this.item.timestamp < DateUtil.getTodayStart() || this.item.timestamp > DateUtil.getTodayEnd()) {
+          Text(`${new Date(this.item.timestamp).getMonth() + 1}/${new Date(this.item.timestamp).getDate()}`)
+            .fontSize(10)
+            .fontColor(AppConstants.COLOR_TEXT_MUTED)
+        }
         Text(DateUtil.formatTime(this.item.timestamp))
           .fontSize(13)
           .fontWeight(FontWeight.Bold)
@@ -33,7 +38,7 @@ export struct TimelineItemCard {
         Text(this.item.icon)
           .fontSize(20)
       }
-      .width(52)
+      .width(54)
       .alignItems(HorizontalAlign.Center)
 
       // 右侧信息卡片
@@ -71,12 +76,25 @@ export struct TimelineItemCard {
 
         // 详细描述
         if (this.item.detailDesc) {
-          Text(this.item.detailDesc)
-            .fontSize(12)
-            .fontColor(this.item.isAbnormal ? AppConstants.COLOR_DANGER : AppConstants.COLOR_TEXT_MUTED)
-            .lineHeight(16)
+          if (this.item.detailDesc.includes('首次添加新食材')) {
+            Row({ space: 4 }) {
+              Text(this.item.detailDesc)
+                .fontSize(11)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#D97706')
+            }
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor('#FEF3C7')
+            .borderRadius(6)
+          } else {
+            Text(this.item.detailDesc)
+              .fontSize(12)
+              .fontColor(this.item.isAbnormal ? AppConstants.COLOR_DANGER : AppConstants.COLOR_TEXT_MUTED)
+              .lineHeight(16)
+          }
         }
       }
+      .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       .padding(12)
       .backgroundColor(this.item.isAbnormal ? '#FFF5F5' : AppConstants.COLOR_CARD_BG)

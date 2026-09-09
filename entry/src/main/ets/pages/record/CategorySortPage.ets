@@ -3,30 +3,48 @@ import promptAction from '@ohos.promptAction';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { ArrowIcon } from '../../common/components/ArrowIcon';
 import { DatabaseHelper } from '../../common/database/DatabaseHelper';
-import { RecordCategoryItem, ALL_RECORD_CATEGORIES, getCategoryByKey, DEFAULT_CATEGORY_KEYS } from '../../common/models/RecordCategoryItem';
+import { RecordCategoryItem, ALL_RECORD_CATEGORIES, getCategoryByKey } from '../../common/models/RecordCategoryItem';
 
 /**
  * 自定义分类排序页面
- * 支持长按/拖拽平滑重排（参照 12001923_67f9410b63eea15447.gif）
+ * 支持长按进入编辑与流畅拖拽重排（严格参照 12001923_67f9410b63eea15447.gif）
  * 排在前 4 项的分类将自动展示在「记录中心」首页
  */
 @Entry
 @Component
 struct CategorySortPage {
   @State categoryKeys: string[] = [];
+  @State isEditMode: boolean = false;
   @State isDragging: boolean = false;
   @State activeDragKey: string = '';
-  @State dragOffsetX: number = 0;
-  @State dragOffsetY: number = 0;
+  @State dragCardX: number = 0;
+  @State dragCardY: number = 0;
   @State containerWidth: number = 340;
   @State isReady: boolean = false;
 
+  private originCardX: number = 0;
+  private originCardY: number = 0;
+  private touchDownX: number = 0;
+  private touchDownY: number = 0;
+  private touchDownKey: string = '';
+  private longPressTimer: number = -1;
+
   private readonly colGap: number = 10;
   private readonly rowGap: number = 10;
-  private readonly cardHeight: number = 102;
+  private readonly cardHeight: number = 96;
 
   aboutToAppear() {
     this.reloadCategories();
+  }
+
+  aboutToDisappear() {
+    DatabaseHelper.getInstance().saveCategoryOrder(this.categoryKeys);
+    AppStorage.setOrCreate('CATEGORY_ORDER_TRIGGER', Date.now());
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
+    if (this.longPressTimer !== -1) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = -1;
+    }
   }
 
   private reloadCategories(): void {
@@ -47,92 +65,131 @@ struct CategorySortPage {
     return row * (this.cardHeight + this.rowGap);
   }
 
-  private handleDragStart(key: string): void {
-    this.activeDragKey = key;
-    this.isDragging = true;
-    this.dragOffsetX = 0;
-    this.dragOffsetY = 0;
+  private handleTouch(key: string, event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      if (event.touches.length > 0) {
+        this.touchDownX = event.touches[0].windowX;
+        this.touchDownY = event.touches[0].windowY;
+        this.touchDownKey = key;
+
+        if (this.longPressTimer !== -1) {
+          clearTimeout(this.longPressTimer);
+          this.longPressTimer = -1;
+        }
+
+        // 长按 220ms 触发编辑并进入拖拽；若已在编辑模式，只需短按 60ms
+        const pressDuration = this.isEditMode ? 60 : 220;
+        this.longPressTimer = setTimeout(() => {
+          this.isEditMode = true;
+          this.startDragging(key);
+        }, pressDuration);
+      }
+    } else if (event.type === TouchType.Move) {
+      if (event.touches.length > 0 && this.touchDownKey === key) {
+        const curX = event.touches[0].windowX;
+        const curY = event.touches[0].windowY;
+        const deltaX = curX - this.touchDownX;
+        const deltaY = curY - this.touchDownY;
+
+        if (!this.isDragging) {
+          // 未激活拖拽前，如果手指滑动超过 8vp，判定为正常滚动并取消长按
+          if (Math.hypot(deltaX, deltaY) > 8) {
+            if (this.longPressTimer !== -1) {
+              clearTimeout(this.longPressTimer);
+              this.longPressTimer = -1;
+            }
+          }
+        } else {
+          // 正在拖拽，实时追踪
+          this.updateDragging(deltaX, deltaY);
+        }
+      }
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      if (this.longPressTimer !== -1) {
+        clearTimeout(this.longPressTimer);
+        this.longPressTimer = -1;
+      }
+      if (this.isDragging) {
+        this.finishDragging();
+      }
+      this.touchDownKey = '';
+    }
   }
 
-  private handleDragUpdate(key: string, offsetX: number, offsetY: number): void {
-    if (!this.isDragging || this.activeDragKey !== key) {
+  private startDragging(key: string): void {
+    const curSlotIdx = this.categoryKeys.indexOf(key);
+    if (curSlotIdx < 0) {
       return;
     }
-    this.dragOffsetX = offsetX;
-    this.dragOffsetY = offsetY;
+    this.activeDragKey = key;
+    this.isDragging = true;
+    this.originCardX = this.getSlotX(curSlotIdx);
+    this.originCardY = this.getSlotY(curSlotIdx);
+    this.dragCardX = this.originCardX;
+    this.dragCardY = this.originCardY;
+  }
 
-    const curIdx = this.categoryKeys.indexOf(key);
+  private updateDragging(deltaX: number, deltaY: number): void {
+    if (!this.isDragging || !this.activeDragKey) {
+      return;
+    }
+    // 拖拽卡片直接严格跟随手指，1:1 定位无任何坐标漂移
+    this.dragCardX = this.originCardX + deltaX;
+    this.dragCardY = this.originCardY + deltaY;
+
+    const cardW = this.getCardWidth();
+    const centerX = this.dragCardX + cardW / 2;
+    const centerY = this.dragCardY + this.cardHeight / 2;
+
+    const curIdx = this.categoryKeys.indexOf(this.activeDragKey);
     if (curIdx < 0) {
       return;
     }
 
-    const cardW = this.getCardWidth();
-    const curSlotX = this.getSlotX(curIdx);
-    const curSlotY = this.getSlotY(curIdx);
-    const curCenterX = curSlotX + this.dragOffsetX + cardW / 2;
-    const curCenterY = curSlotY + this.dragOffsetY + this.cardHeight / 2;
+    // 寻找与当前卡片中心欧氏距离最近的目标插槽
+    let closestSlot = curIdx;
+    let minDistanceSq = Number.MAX_VALUE;
 
-    let targetCol = Math.floor(curCenterX / (cardW + this.colGap));
-    let targetRow = Math.floor(curCenterY / (this.cardHeight + this.rowGap));
-    targetCol = Math.max(0, Math.min(1, targetCol));
-    targetRow = Math.max(0, Math.min(3, targetRow));
+    for (let i = 0; i < this.categoryKeys.length; i++) {
+      const slotCenterX = this.getSlotX(i) + cardW / 2;
+      const slotCenterY = this.getSlotY(i) + this.cardHeight / 2;
+      const dx = centerX - slotCenterX;
+      const dy = centerY - slotCenterY;
+      const distSq = dx * dx + dy * dy;
 
-    const targetIdx = targetRow * 2 + targetCol;
-    if (targetIdx >= 0 && targetIdx < this.categoryKeys.length && targetIdx !== curIdx) {
-      const oldSlotX = this.getSlotX(curIdx);
-      const oldSlotY = this.getSlotY(curIdx);
-      const newSlotX = this.getSlotX(targetIdx);
-      const newSlotY = this.getSlotY(targetIdx);
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        closestSlot = i;
+      }
+    }
 
-      // 调整拖拽偏移量，使卡片保持在手指相对位置不变形
-      this.dragOffsetX += (oldSlotX - newSlotX);
-      this.dragOffsetY += (oldSlotY - newSlotY);
+    // 距离滞后判断：距离新目标插槽显著更近时才触发平滑滑位重排，防止边界闪烁
+    if (closestSlot !== curIdx) {
+      const curSlotCenterX = this.getSlotX(curIdx) + cardW / 2;
+      const curSlotCenterY = this.getSlotY(curIdx) + this.cardHeight / 2;
+      const curDx = centerX - curSlotCenterX;
+      const curDy = centerY - curSlotCenterY;
+      const curDistSq = curDx * curDx + curDy * curDy;
 
-      const newKeys: string[] = [...this.categoryKeys];
-      const removed = newKeys.splice(curIdx, 1);
-      newKeys.splice(targetIdx, 0, removed[0]);
-      this.categoryKeys = newKeys;
+      if (minDistanceSq < curDistSq * 0.65) {
+        const newKeys: string[] = [...this.categoryKeys];
+        const removed = newKeys.splice(curIdx, 1);
+        newKeys.splice(closestSlot, 0, removed[0]);
+        this.categoryKeys = newKeys;
+      }
     }
   }
 
-  private finishDrag(): void {
+  private finishDragging(): void {
     if (!this.isDragging) {
       return;
     }
     this.isDragging = false;
     this.activeDragKey = '';
-    this.dragOffsetX = 0;
-    this.dragOffsetY = 0;
+    // 立即落位保存最新分类顺序
     DatabaseHelper.getInstance().saveCategoryOrder(this.categoryKeys);
     try {
-      promptAction.showToast({ message: '分类顺序已保存' });
-    } catch (e) {}
-  }
-
-  private moveCategory(key: string, delta: number): void {
-    const curIdx = this.categoryKeys.indexOf(key);
-    if (curIdx < 0) {
-      return;
-    }
-    const newIdx = curIdx + delta;
-    if (newIdx < 0 || newIdx >= this.categoryKeys.length) {
-      return;
-    }
-    const newKeys: string[] = [...this.categoryKeys];
-    const removed = newKeys.splice(curIdx, 1);
-    newKeys.splice(newIdx, 0, removed[0]);
-    this.categoryKeys = newKeys;
-    DatabaseHelper.getInstance().saveCategoryOrder(this.categoryKeys);
-    try {
-      promptAction.showToast({ message: '分类顺序已调整' });
-    } catch (e) {}
-  }
-
-  private resetToDefault(): void {
-    DatabaseHelper.getInstance().resetCategoryOrder();
-    this.reloadCategories();
-    try {
-      promptAction.showToast({ message: '已恢复默认分类排序' });
+      promptAction.showToast({ message: '分类顺序已更新' });
     } catch (e) {}
   }
 
@@ -156,6 +213,9 @@ struct CategorySortPage {
         .borderRadius(18)
         .backgroundColor('rgba(0, 0, 0, 0.05)')
         .onClick(() => {
+          DatabaseHelper.getInstance().saveCategoryOrder(this.categoryKeys);
+          AppStorage.setOrCreate('CATEGORY_ORDER_TRIGGER', Date.now());
+          AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
           router.back();
         })
 
@@ -167,33 +227,39 @@ struct CategorySortPage {
 
         Blank()
 
-        Text('恢复默认')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(AppConstants.COLOR_PRIMARY)
-          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-          .backgroundColor('#FFF5F2')
-          .borderRadius(14)
-          .onClick(() => {
-            this.resetToDefault();
-          })
+        if (this.isEditMode) {
+          Text('完成')
+            .fontSize(13)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White)
+            .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+            .backgroundColor(AppConstants.COLOR_PRIMARY)
+            .borderRadius(14)
+            .onClick(() => {
+              this.isEditMode = false;
+              DatabaseHelper.getInstance().saveCategoryOrder(this.categoryKeys);
+              try {
+                promptAction.showToast({ message: '分类排序已保存' });
+              } catch (e) {}
+            })
+        }
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 12, bottom: 10 })
 
       Scroll() {
         Column({ space: 14 }) {
-          // 2. 核心说明卡片
+          // 2. 核心说明卡片（清晰提示：长按可以进入编辑）
           Column({ space: 6 }) {
             Row({ space: 6 }) {
               Text('💡')
                 .fontSize(16)
-              Text('长按或拖拽卡片自由排序')
+              Text('长按可以进入编辑')
                 .fontSize(14)
                 .fontWeight(FontWeight.Bold)
                 .fontColor(AppConstants.COLOR_TEXT_MAIN)
             }
-            Text('排在第 1~4 位的分类将固定展示在「记录中心」首页，点击即可极速录入；松手后自动保存生效。')
+            Text('长按卡片进入编辑模式，可自由拖拽调整顺序。排在第 1~4 位的分类将固定展示在「记录中心」首页。')
               .fontSize(12)
               .fontColor(AppConstants.COLOR_TEXT_MUTED)
               .lineHeight(17)
@@ -219,14 +285,14 @@ struct CategorySortPage {
           .borderRadius(16)
           .border({ width: 1, color: '#F0EBE1' })
 
-          // 3. 拖拽插槽网格容器 (Stack 动态插槽坐标布局，支持流畅的位移动画)
+          // 3. 拖拽插槽网格容器 (Stack 动态插槽坐标布局，支持流畅丝滑的位移动画)
           Stack() {
             ForEach(ALL_RECORD_CATEGORIES, (item: RecordCategoryItem) => {
               this.renderCategoryCard(item)
             }, (item: RecordCategoryItem) => item.key)
           }
           .width('100%')
-          .height(4 * this.cardHeight + 3 * this.rowGap + 10)
+          .height(4 * this.cardHeight + 3 * this.rowGap + 12)
           .onAreaChange((oldVal: Area, newVal: Area) => {
             this.containerWidth = Number(newVal.width);
             if (!this.isReady) {
@@ -235,19 +301,20 @@ struct CategorySortPage {
               }, 50);
             }
           })
-
-          // 4. 底部友好提示
-          Row({ space: 6 }) {
-            Text('ℹ️')
-              .fontSize(13)
-            Text('支持手指拖拽换位，也可直接点击卡片上的 ⬆ ⬇ 快速微调')
-              .fontSize(11)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-          }
-          .margin({ top: 6, bottom: 24 })
+          .onTouch((event: TouchEvent) => {
+            if (this.isDragging && event.touches.length > 0) {
+              if (event.type === TouchType.Move) {
+                const curX = event.touches[0].windowX;
+                const curY = event.touches[0].windowY;
+                this.updateDragging(curX - this.touchDownX, curY - this.touchDownY);
+              } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+                this.finishDragging();
+              }
+            }
+          })
         }
         .width('92%')
-        .padding({ top: 6, bottom: 20 })
+        .padding({ top: 6, bottom: 30 })
       }
       .scrollable(ScrollDirection.Vertical)
       .scrollBar(BarState.Off)
@@ -260,7 +327,7 @@ struct CategorySortPage {
 
   /**
    * 渲染单个分类卡片
-   * 保持与记录中心首页完全一致的高质感马卡龙配色和排版
+   * 纯净原生卡片设计，去除多余按钮，完美还原记录中心美感
    */
   @Builder
   renderCategoryCard(item: RecordCategoryItem) {
@@ -282,39 +349,6 @@ struct CategorySortPage {
         .borderRadius(6)
 
         Blank()
-
-        // 快速微调上移/下移按钮 + 拖拽手柄符号
-        Row({ space: 4 }) {
-          if (this.categoryKeys.indexOf(item.key) > 0) {
-            Text('▲')
-              .fontSize(10)
-              .fontColor('#718096')
-              .padding({ left: 4, right: 4, top: 2, bottom: 2 })
-              .backgroundColor('rgba(255, 255, 255, 0.6)')
-              .borderRadius(4)
-              .onClick(() => {
-                this.moveCategory(item.key, -1);
-              })
-          }
-
-          if (this.categoryKeys.indexOf(item.key) < this.categoryKeys.length - 1) {
-            Text('▼')
-              .fontSize(10)
-              .fontColor('#718096')
-              .padding({ left: 4, right: 4, top: 2, bottom: 2 })
-              .backgroundColor('rgba(255, 255, 255, 0.6)')
-              .borderRadius(4)
-              .onClick(() => {
-                this.moveCategory(item.key, 1);
-              })
-          }
-
-          Text('⠿')
-            .fontSize(15)
-            .fontColor('rgba(0, 0, 0, 0.3)')
-            .margin({ left: 2 })
-        }
-        .hitTestBehavior(HitTestMode.Block)
       }
       .width('100%')
 
@@ -348,34 +382,22 @@ struct CategorySortPage {
       color: this.categoryKeys.indexOf(item.key) < 4 ? 'rgba(255, 122, 69, 0.35)' : 'rgba(0, 0, 0, 0.05)'
     })
     .position({
-      x: this.getSlotX(this.categoryKeys.indexOf(item.key)) +
-        (this.isDragging && this.activeDragKey === item.key ? this.dragOffsetX : 0),
-      y: this.getSlotY(this.categoryKeys.indexOf(item.key)) +
-        (this.isDragging && this.activeDragKey === item.key ? this.dragOffsetY : 0)
+      x: (this.isDragging && this.activeDragKey === item.key) ?
+        this.dragCardX : this.getSlotX(this.categoryKeys.indexOf(item.key)),
+      y: (this.isDragging && this.activeDragKey === item.key) ?
+        this.dragCardY : this.getSlotY(this.categoryKeys.indexOf(item.key))
     })
-    .scale(this.isDragging && this.activeDragKey === item.key ? { x: 1.07, y: 1.07 } : { x: 1, y: 1 })
+    .scale(this.isDragging && this.activeDragKey === item.key ? { x: 1.08, y: 1.08 } : { x: 1, y: 1 })
     .shadow(this.isDragging && this.activeDragKey === item.key ?
-      { radius: 20, color: 'rgba(0, 0, 0, 0.22)', offsetY: 10 } :
+      { radius: 24, color: 'rgba(0, 0, 0, 0.28)', offsetY: 12 } :
       { radius: 0, color: 'transparent', offsetY: 0 })
     .zIndex(this.isDragging && this.activeDragKey === item.key ? 999 : 1)
     .animation(this.isReady && !(this.isDragging && this.activeDragKey === item.key) ? {
       duration: 250,
       curve: Curve.FastOutSlowIn
     } : null)
-    .gesture(
-      PanGesture({ direction: PanDirection.All, distance: 4 })
-        .onActionStart((event: GestureEvent) => {
-          this.handleDragStart(item.key);
-        })
-        .onActionUpdate((event: GestureEvent) => {
-          this.handleDragUpdate(item.key, event.offsetX, event.offsetY);
-        })
-        .onActionEnd(() => {
-          this.finishDrag();
-        })
-        .onActionCancel(() => {
-          this.finishDrag();
-        })
-    )
+    .onTouch((event: TouchEvent) => {
+      this.handleTouch(item.key, event);
+    })
   }
 }

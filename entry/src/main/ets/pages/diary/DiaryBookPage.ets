@@ -399,9 +399,15 @@ export struct DiaryBookPage {
                     .border({ width: 1, color: AppConstants.COLOR_BORDER })
                   }
                 }, (item: ExpenseRecord) => item.id)
+
+                // 底部 spacer，防止浮动 TabBar 遮挡最后一条
+                ListItem() {
+                  Row().height(88)
+                }
               }
               .layoutWeight(1)
               .width('100%')
+              .edgeEffect(EdgeEffect.Spring)
             }
           }
           .width('94%')
@@ -483,9 +489,15 @@ export struct DiaryBookPage {
                     .borderRadius(10)
                   }
                 }, (item: RoutineItem) => item.id)
+
+                // 底部 spacer，防止浮动 TabBar 遮挡最后一条
+                ListItem() {
+                  Row().height(88)
+                }
               }
               .layoutWeight(1)
               .width('100%')
+              .edgeEffect(EdgeEffect.Spring)
             }
           }
           .width('94%')
@@ -503,7 +515,7 @@ export struct DiaryBookPage {
                   .fontSize(14)
                   .fontWeight(FontWeight.Medium)
                   .fontColor(AppConstants.COLOR_TEXT_MAIN)
-                Text('轻触右下角「+」记录写给宝贝的爱与祝福')
+                Text('轻触右下角「+」写下对宝宝想说的话')
                   .fontSize(12)
                   .fontColor(AppConstants.COLOR_TEXT_MUTED)
               }
@@ -571,9 +583,15 @@ export struct DiaryBookPage {
                     .borderRadius(14)
                   }
                 }, (item: ParentsMessageItem) => item.id)
+
+                // 底部 spacer，防止浮动 TabBar 遮挡最后一条
+                ListItem() {
+                  Row().height(88)
+                }
               }
               .layoutWeight(1)
               .width('100%')
+              .edgeEffect(EdgeEffect.Spring)
             }
           }
           .width('94%')
@@ -583,7 +601,7 @@ export struct DiaryBookPage {
       .width('100%')
       .height('100%')
 
-      // 右下角常驻悬浮按钮（截图三：悬浮 + 按钮，点击按当前 Tab 呼出对应记录弹窗）
+      // 右下角常驻悬浮按钮（避让底部悬浮胶囊导航栏）
       Button({ type: ButtonType.Circle }) {
         Text('+')
           .fontSize(30)
@@ -595,7 +613,7 @@ export struct DiaryBookPage {
       .height(52)
       .backgroundColor(AppConstants.COLOR_PRIMARY)
       .shadow({ radius: 8, color: 'rgba(255, 122, 89, 0.45)', offsetY: 4 })
-      .margin({ right: 20, bottom: 20 })
+      .margin({ right: 20, bottom: 88 })
       .onClick(() => {
         this.handleFabClick();
       })

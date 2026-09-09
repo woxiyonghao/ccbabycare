@@ -90,20 +90,23 @@ export struct EliminationRecordDialog {
           Text('便便性状：')
             .fontSize(12)
             .fontColor(AppConstants.COLOR_TEXT_MUTED)
-          Row({ space: 6 }) {
+          Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
             ForEach(this.textures, (t: StoolTexture) => {
               Text(t)
                 .fontSize(11)
                 .fontWeight(this.stoolTexture === t ? FontWeight.Bold : FontWeight.Normal)
                 .fontColor(this.stoolTexture === t ? AppConstants.COLOR_PRIMARY : AppConstants.COLOR_TEXT_MAIN)
-                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .margin({ right: 6, bottom: 6 })
                 .backgroundColor(this.stoolTexture === t ? AppConstants.COLOR_PRIMARY_LIGHT : '#F7FAFC')
                 .borderRadius(8)
                 .border({ width: 1, color: this.stoolTexture === t ? AppConstants.COLOR_PRIMARY : '#E2E8F0' })
                 .onClick(() => { this.stoolTexture = t; })
             }, (t: StoolTexture) => t)
           }
+          .width('100%')
         }
+        .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
 
@@ -113,13 +116,14 @@ export struct EliminationRecordDialog {
           Text('便便颜色：')
             .fontSize(12)
             .fontColor(AppConstants.COLOR_TEXT_MUTED)
-          Row({ space: 6 }) {
+          Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
             ForEach(this.colors, (c: StoolColor) => {
               Text(c)
                 .fontSize(11)
                 .fontWeight(this.stoolColor === c ? FontWeight.Bold : FontWeight.Normal)
                 .fontColor(this.stoolColor === c ? AppConstants.COLOR_PRIMARY : AppConstants.COLOR_TEXT_MAIN)
-                .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+                .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+                .margin({ right: 6, bottom: 6 })
                 .backgroundColor(this.stoolColor === c ? AppConstants.COLOR_PRIMARY_LIGHT : '#F7FAFC')
                 .borderRadius(8)
                 .border({ width: 1, color: this.stoolColor === c ? AppConstants.COLOR_PRIMARY : '#E2E8F0' })
@@ -131,7 +135,9 @@ export struct EliminationRecordDialog {
                 })
             }, (c: StoolColor) => c)
           }
+          .width('100%')
         }
+        .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
 

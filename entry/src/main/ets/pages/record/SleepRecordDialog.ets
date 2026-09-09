@@ -64,18 +64,22 @@ export struct SleepRecordDialog {
         Text('睡眠时长：')
           .fontSize(12)
           .fontColor(AppConstants.COLOR_TEXT_MUTED)
-        Row({ space: 6 }) {
+        Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
           ForEach(this.quickDurations, (dur: number) => {
             Text(`${dur}分`)
               .fontSize(12)
               .fontWeight(this.durationMinutes === dur ? FontWeight.Bold : FontWeight.Normal)
               .fontColor(this.durationMinutes === dur ? Color.White : AppConstants.COLOR_TEXT_MAIN)
               .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+              .margin({ right: 6, bottom: 6 })
               .backgroundColor(this.durationMinutes === dur ? AppConstants.COLOR_SECONDARY : '#F7FAFC')
               .borderRadius(12)
-              .onClick(() => { this.durationMinutes = dur; })
+              .onClick(() => {
+                this.durationMinutes = dur;
+              })
           }, (dur: number) => dur.toString())
         }
+        .width('100%')
       }
       .alignItems(HorizontalAlign.Start)
 

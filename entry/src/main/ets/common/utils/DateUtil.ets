@@ -94,4 +94,41 @@ export class DateUtil {
            d1.getMonth() === d2.getMonth() &&
            d1.getDate() === d2.getDate();
   }
+
+  /**
+   * 格式化分组日期键：YYYY-MM-DD
+   */
+  static formatDateKey(timestamp: number): string {
+    if (timestamp <= 0) {
+      return '';
+    }
+    const d = new Date(timestamp);
+    const y = d.getFullYear();
+    const m = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  /**
+   * 获取日期的相对描述（今天、昨天、周几）
+   */
+  static getRelativeDayDesc(timestamp: number): string {
+    if (timestamp <= 0) {
+      return '';
+    }
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    const yesterdayStart = todayStart - 24 * 3600 * 1000;
+    const tomorrowStart = todayStart + 24 * 3600 * 1000;
+
+    if (timestamp >= todayStart && timestamp < tomorrowStart) {
+      return '今天';
+    } else if (timestamp >= yesterdayStart && timestamp < todayStart) {
+      return '昨天';
+    } else {
+      const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      const d = new Date(timestamp);
+      return weekdays[d.getDay()];
+    }
+  }
 }

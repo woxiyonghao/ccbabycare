@@ -58,8 +58,8 @@ struct Index {
       })
       .width('100%')
       .height('100%')
-      .padding({ bottom: 76 }) // 为底部悬浮胶囊预留间距，避免遮挡内容
 
+      
       // 华为相册同款悬浮毛玻璃胶囊导航栏（保持温暖桃橙主色系）
       Row({ space: 4 }) {
         ForEach(this.tabItems, (item: TabItemConfig) => {
@@ -108,6 +108,5 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(AppConstants.COLOR_BG_CREAM)
   }
 }

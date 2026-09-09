@@ -299,7 +299,7 @@ export struct ProfilePage {
           })
         }
         .width('94%')
-        .padding({ bottom: 40 })
+        .padding({ bottom: 88 })
       }
       .layoutWeight(1)
       .width('100%')

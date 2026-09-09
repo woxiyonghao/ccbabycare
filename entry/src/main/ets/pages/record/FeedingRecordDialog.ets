@@ -12,6 +12,7 @@ export struct FeedingRecordDialog {
   controller: CustomDialogController;
   onSuccess?: () => void;
 
+  initialType: FeedingType = FeedingType.FORMULA;
   @State feedingType: FeedingType = FeedingType.FORMULA;
   @State amount: number = 120;
   @State selectedStage: FormulaStage = FormulaStage.STAGE_1;
@@ -23,6 +24,12 @@ export struct FeedingRecordDialog {
   @State solidsName: string = '';
   @State isNewFood: boolean = false;
   @State notes: string = '';
+
+  aboutToAppear() {
+    if (this.initialType) {
+      this.feedingType = this.initialType;
+    }
+  }
 
   private stages: FormulaStage[] = [
     FormulaStage.STAGE_1,
@@ -115,13 +122,14 @@ export struct FeedingRecordDialog {
           }
 
           // 奶量快捷选
-          Row({ space: 6 }) {
+          Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
             ForEach(this.quickAmounts, (amt: number) => {
               Text(`${amt}ml`)
                 .fontSize(12)
                 .fontWeight(this.amount === amt ? FontWeight.Bold : FontWeight.Normal)
                 .fontColor(this.amount === amt ? Color.White : AppConstants.COLOR_TEXT_MAIN)
-                .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .margin({ right: 6, bottom: 6 })
                 .backgroundColor(this.amount === amt ? AppConstants.COLOR_PRIMARY : '#F7FAFC')
                 .borderRadius(12)
                 .onClick(() => {
@@ -131,6 +139,7 @@ export struct FeedingRecordDialog {
                 })
             }, (amt: number) => amt.toString())
           }
+          .width('100%')
 
           // 冲调微调
           Row({ space: 12 }) {

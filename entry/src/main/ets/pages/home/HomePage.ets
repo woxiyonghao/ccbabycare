@@ -1,3 +1,5 @@
+import router from '@ohos.router';
+import promptAction from '@ohos.promptAction';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { DatabaseHelper } from '../../common/database/DatabaseHelper';
 import { BabyModel } from '../../common/models/BabyModel';
@@ -8,6 +10,7 @@ import { DateUtil } from '../../common/utils/DateUtil';
 import { QuickRecordBar } from '../../common/components/QuickRecordBar';
 import { TimelineItemCard, TimelineData } from '../../common/components/TimelineItemCard';
 import { CaregiverConstants } from '../../common/constants/CaregiverConstants';
+import { FeedingType } from '../../common/constants/FeedingConstants';
 import { FeedingRecordDialog } from '../record/FeedingRecordDialog';
 import { EliminationRecordDialog } from '../record/EliminationRecordDialog';
 import { SleepRecordDialog } from '../record/SleepRecordDialog';
@@ -31,15 +34,37 @@ export struct HomePage {
   @StorageProp('APP_REFRESH_TRIGGER') @Watch('refreshData') refreshTrigger: number = 0;
   @StorageProp('CACHE_BABY_INFO') @Watch('onBabyCacheChanged') cachedBabyJson: string = '';
 
-  // 弹窗控制器
-  private feedingDialogController: CustomDialogController = new CustomDialogController({
+  // 弹窗控制器（统一定位 Center 居中弹窗，彻底杜绝输入法弹出时缩小变形）
+  private formulaDialogController: CustomDialogController = new CustomDialogController({
     builder: FeedingRecordDialog({
+      initialType: FeedingType.FORMULA,
       onSuccess: () => {
         this.refreshData();
       }
     }),
-    alignment: DialogAlignment.Bottom,
-    offset: { dx: 0, dy: -20 },
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
+
+  private breastDialogController: CustomDialogController = new CustomDialogController({
+    builder: FeedingRecordDialog({
+      initialType: FeedingType.BREASTFEEDING,
+      onSuccess: () => {
+        this.refreshData();
+      }
+    }),
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
+
+  private solidsDialogController: CustomDialogController = new CustomDialogController({
+    builder: FeedingRecordDialog({
+      initialType: FeedingType.SOLIDS,
+      onSuccess: () => {
+        this.refreshData();
+      }
+    }),
+    alignment: DialogAlignment.Center,
     customStyle: true
   });
 
@@ -49,8 +74,7 @@ export struct HomePage {
         this.refreshData();
       }
     }),
-    alignment: DialogAlignment.Bottom,
-    offset: { dx: 0, dy: -20 },
+    alignment: DialogAlignment.Center,
     customStyle: true
   });
 
@@ -60,8 +84,7 @@ export struct HomePage {
         this.refreshData();
       }
     }),
-    alignment: DialogAlignment.Bottom,
-    offset: { dx: 0, dy: -20 },
+    alignment: DialogAlignment.Center,
     customStyle: true
   });
 
@@ -183,10 +206,14 @@ export struct HomePage {
     });
     this.todaySleepMinutes = sleepMins;
 
-    // 组合今日时间轴
+    // 组合时间轴
+    // 组合今日时间轴流水（首页严格仅展示今日）
     const items: TimelineData[] = [];
 
     feedings.forEach((f: FeedingRecord) => {
+      if (f.recordTime < todayStart || f.recordTime > todayEnd) {
+        return;
+      }
       let icon = '🍼';
       let title = '配方奶';
       let amtDesc = `${f.amount} ml`;
@@ -205,11 +232,13 @@ export struct HomePage {
       } else if (f.feedingType === 'SOLIDS') {
         icon = '🥣';
         title = f.solidsName || '宝宝辅食';
-        amtDesc = `${f.amount} g`;
-        detail = f.isNewFood ? '⭐ 首次添加新食材' : '正常辅食';
+        amtDesc = f.amount > 0 ? `${f.amount} g` : '';
+        detail = f.isNewFood ? '⭐ 首次添加新食材' : (f.notes || '');
       }
 
-      if (f.notes) {
+      if (f.notes && f.feedingType !== 'SOLIDS') {
+        detail += ` · ${f.notes}`;
+      } else if (f.notes && f.feedingType === 'SOLIDS' && f.isNewFood) {
         detail += ` · ${f.notes}`;
       }
 
@@ -227,6 +256,9 @@ export struct HomePage {
     });
 
     elims.forEach((e: EliminationRecord) => {
+      if (e.recordTime < todayStart || e.recordTime > todayEnd) {
+        return;
+      }
       let icon = '💩';
       let title = '便便';
       if (e.eliminationType === 'PEE') {
@@ -259,6 +291,9 @@ export struct HomePage {
     });
 
     sleeps.forEach((s: SleepRecord) => {
+      if (s.startTime < todayStart || s.startTime > todayEnd) {
+        return;
+      }
       items.push({
         id: s.id,
         category: 'SLEEP',
@@ -277,236 +312,365 @@ export struct HomePage {
     this.timelineItems = items;
   }
 
-  build() {
-    Column() {
-      // 1. 顶部宝宝信息卡片
-      Row({ space: 12 }) {
-        Image($r('app.media.app_icon'))
-          .width(52)
-          .height(52)
-          .borderRadius(16)
-          .border({ width: 2, color: '#FFFFFF' })
-          .shadow({ radius: 8, color: 'rgba(255,123,84,0.25)', offsetX: 0, offsetY: 4 })
-
-        Column({ space: 4 }) {
-          Row({ space: 8 }) {
-            Text(this.currentBaby.name)
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(AppConstants.COLOR_TEXT_MAIN)
-
-            Text(this.currentBaby.gender === 'boy' ? '👦 男宝' : '👧 女宝')
-              .fontSize(11)
-              .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-              .backgroundColor('#EBF8FF')
-              .fontColor('#2B6CB0')
-              .borderRadius(8)
+  private showDeleteTimelineDialog(item: TimelineData): void {
+    AlertDialog.show({
+      title: '删除记录',
+      message: `确定要删除此条「${item.title} (${item.amountDesc})」记录吗？删除后不可恢复。`,
+      primaryButton: {
+        value: '取消',
+        action: () => {}
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: AppConstants.COLOR_DANGER,
+        action: () => {
+          const db = DatabaseHelper.getInstance();
+          if (item.category === 'FEEDING') {
+            db.deleteFeedingRecord(item.id);
+          } else if (item.category === 'ELIMINATION') {
+            db.deleteEliminationRecord(item.id);
+          } else if (item.category === 'SLEEP') {
+            db.deleteSleepRecord(item.id);
           }
+          this.refreshData();
+          try {
+            promptAction.showToast({ message: '已删除该条记录' });
+          } catch (e) {}
+        }
+      }
+    });
+  }
 
-          Row({ space: 8 }) {
-            Text(`🎂 月龄: ${this.currentBaby.getAgeString()}`)
-              .fontSize(12)
-              .fontColor(AppConstants.COLOR_PRIMARY)
-              .fontWeight(FontWeight.Medium)
-            Text(`⚖️ 出生: ${this.currentBaby.birthWeight}kg`)
+  @Builder
+  renderSwipeDeleteButton(item: TimelineData) {
+    Row() {
+      Button('删除', { type: ButtonType.Normal })
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(Color.White)
+        .backgroundColor(AppConstants.COLOR_DANGER)
+        .width(68)
+        .height('100%')
+        .borderRadius(14)
+        .margin({ left: 6 })
+        .onClick(() => {
+          this.showDeleteTimelineDialog(item);
+        })
+    }
+    .height('100%')
+    .alignItems(VerticalAlign.Center)
+    .justifyContent(FlexAlign.End)
+  }
+
+  build() {
+    List({ space: 8 }) {
+      // 1. 顶部宝宝信息卡片（支持点击进入宝宝档案修改；去掉「档案 >」）
+      ListItem() {
+        Row({ space: 12 }) {
+          Image($r('app.media.app_icon'))
+            .width(52)
+            .height(52)
+            .borderRadius(16)
+            .border({ width: 2, color: '#FFFFFF' })
+            .shadow({ radius: 8, color: 'rgba(255,123,84,0.25)', offsetX: 0, offsetY: 4 })
+
+          Column({ space: 4 }) {
+            Row({ space: 8 }) {
+              Text(this.currentBaby.name)
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(AppConstants.COLOR_TEXT_MAIN)
+
+              Text(this.currentBaby.gender === 'boy' ? '👦 男宝' : '👧 女宝')
+                .fontSize(11)
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                .backgroundColor('#EBF8FF')
+                .fontColor('#2B6CB0')
+                .borderRadius(8)
+            }
+
+            Row({ space: 8 }) {
+              Text(`🎂 月龄: ${this.currentBaby.getAgeString()}`)
+                .fontSize(12)
+                .fontColor(AppConstants.COLOR_PRIMARY)
+                .fontWeight(FontWeight.Medium)
+              Text(`⚖️ 出生: ${this.currentBaby.birthWeight}kg`)
+                .fontSize(12)
+                .fontColor(AppConstants.COLOR_TEXT_MUTED)
+            }
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 12, bottom: 4 })
+        .backgroundColor(AppConstants.COLOR_BG_CREAM)
+        .onClick(() => {
+          router.pushUrl({ url: 'pages/profile/EditBabyProfilePage' });
+        })
+      }
+
+      // 2. 今日核心概览与极速记录（整体卡片设计；去掉「今日喂养概况 >」）
+      ListItem() {
+        Column({ space: 10 }) {
+          // 距上次喂奶倒计时提示
+          Row() {
+            Text('⏱️ 距上次喂奶：')
               .fontSize(12)
               .fontColor(AppConstants.COLOR_TEXT_MUTED)
+            Text(this.lastFeedElapsed)
+              .fontSize(13)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(AppConstants.COLOR_PRIMARY)
           }
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 10 })
-      .backgroundColor(AppConstants.COLOR_BG_CREAM)
+          .width('100%')
 
-      // 2. 今日关键指标概览卡片（手绘奶油风格）
-      Column({ space: 10 }) {
-        // 距上次喂奶倒计时提示
+          // 4格核心数据盘（点击各指标卡直达极速记录，防折行紧凑排版）
+          Row({ space: 5 }) {
+            // 奶量
+            Column({ space: 2 }) {
+              Row({ space: 2 }) {
+                Text('🍼')
+                  .fontSize(11)
+                Text('喝奶总量')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                  .maxLines(1)
+              }
+              Row() {
+                Text(`${this.todayMilkTotal}`)
+                  .fontSize(17)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(AppConstants.COLOR_PRIMARY)
+                Text(' ml')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              Text(`共 ${this.todayFeedCount} 次`)
+                .fontSize(10)
+                .fontColor('#A0AEC0')
+                .maxLines(1)
+            }
+            .layoutWeight(1)
+            .padding({ left: 4, right: 4, top: 8, bottom: 8 })
+            .backgroundColor('#FFF5F2')
+            .borderRadius(12)
+            .onClick(() => {
+              this.formulaDialogController.open();
+            })
+
+            // 便便
+            Column({ space: 2 }) {
+              Row({ space: 2 }) {
+                Text('💩')
+                  .fontSize(11)
+                Text('便便次数')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                  .maxLines(1)
+              }
+              Row() {
+                Text(`${this.todayPoopCount}`)
+                  .fontSize(17)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#319795')
+                Text(' 次')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              Text('肠胃正常')
+                .fontSize(10)
+                .fontColor('#A0AEC0')
+                .maxLines(1)
+            }
+            .layoutWeight(1)
+            .padding({ left: 4, right: 4, top: 8, bottom: 8 })
+            .backgroundColor('#E6FFFA')
+            .borderRadius(12)
+            .onClick(() => {
+              this.elimDialogController.open();
+            })
+
+            // 嘘嘘
+            Column({ space: 2 }) {
+              Row({ space: 2 }) {
+                Text('💧')
+                  .fontSize(11)
+                Text('嘘嘘次数')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                  .maxLines(1)
+              }
+              Row() {
+                Text(`${this.todayPeeCount}`)
+                  .fontSize(17)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#3182CE')
+                Text(' 次')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              Text('换尿布顺畅')
+                .fontSize(10)
+                .fontColor('#A0AEC0')
+                .maxLines(1)
+            }
+            .layoutWeight(1)
+            .padding({ left: 4, right: 4, top: 8, bottom: 8 })
+            .backgroundColor('#EBF8FF')
+            .borderRadius(12)
+            .onClick(() => {
+              this.elimDialogController.open();
+            })
+
+            // 睡眠
+            Column({ space: 2 }) {
+              Row({ space: 2 }) {
+                Text('🌙')
+                  .fontSize(11)
+                Text('累计睡眠')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                  .maxLines(1)
+              }
+              Row() {
+                Text(`${(this.todaySleepMinutes / 60).toFixed(1)}`)
+                  .fontSize(17)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(AppConstants.COLOR_SECONDARY)
+                Text(' h')
+                  .fontSize(10)
+                  .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              }
+              Text(`${this.todaySleepMinutes} 分钟`)
+                .fontSize(10)
+                .fontColor('#A0AEC0')
+                .maxLines(1)
+            }
+            .layoutWeight(1)
+            .padding({ left: 4, right: 4, top: 8, bottom: 8 })
+            .backgroundColor('#FAF5FF')
+            .borderRadius(12)
+            .onClick(() => {
+              this.sleepDialogController.open();
+            })
+          }
+          .width('100%')
+
+          // 柔和优雅的分隔线
+          Divider()
+            .color('#F6F4EE')
+            .strokeWidth(1)
+            .margin({ top: 2, bottom: 2 })
+
+          // 极速记录快捷操作栏（作为整体卡片的一部分）
+          QuickRecordBar({
+            onSelectAction: (typeKey: string) => {
+              if (typeKey === 'FORMULA') {
+                this.formulaDialogController.open();
+              } else if (typeKey === 'BREAST') {
+                this.breastDialogController.open();
+              } else if (typeKey === 'DIAPER') {
+                this.elimDialogController.open();
+              } else if (typeKey === 'SLEEP') {
+                this.sleepDialogController.open();
+              } else if (typeKey === 'SOLIDS') {
+                this.solidsDialogController.open();
+              }
+            }
+          })
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 12, bottom: 10 })
+        .backgroundColor(AppConstants.COLOR_CARD_BG)
+        .borderRadius(18)
+        .shadow({ radius: 8, color: 'rgba(0,0,0,0.04)', offsetX: 0, offsetY: 2 })
+      }
+      .padding({ left: '3%', right: '3%' })
+
+      // 3. 今日喂养标题与进入全部流水入口（字样改为「今日喂养」）
+      ListItem() {
         Row() {
-          Text('⏱️ 距上次喂奶：')
-            .fontSize(12)
-            .fontColor(AppConstants.COLOR_TEXT_MUTED)
-          Text(this.lastFeedElapsed)
-            .fontSize(13)
+          Text('今日喂养')
+            .fontSize(16)
             .fontWeight(FontWeight.Bold)
-            .fontColor(AppConstants.COLOR_PRIMARY)
+            .fontColor(AppConstants.COLOR_TEXT_MAIN)
           Blank()
           Row({ space: 3 }) {
-            Text('今日喂养概况')
-              .fontSize(11)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            ArrowIcon({ arrowDirection: 'right', variant: 'gray', iconSize: 11 })
+            Text('全部')
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(AppConstants.COLOR_PRIMARY)
+            ArrowIcon({ arrowDirection: 'right', variant: 'orange', iconSize: 11 })
           }
-          .alignItems(VerticalAlign.Center)
-        }
-        .width('100%')
-
-        // 4格核心数据盘
-        Row({ space: 8 }) {
-          // 奶量
-          Column({ space: 2 }) {
-            Text('🍼 喝奶总量')
-              .fontSize(11)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            Row() {
-              Text(`${this.todayMilkTotal}`)
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(AppConstants.COLOR_PRIMARY)
-              Text(' ml')
-                .fontSize(11)
-                .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            }
-            Text(`共 ${this.todayFeedCount} 次`)
-              .fontSize(10)
-              .fontColor('#A0AEC0')
-          }
-          .layoutWeight(1)
-          .padding(8)
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .borderRadius(10)
           .backgroundColor('#FFF5F2')
-          .borderRadius(12)
-
-          // 便便
-          Column({ space: 2 }) {
-            Text('💩 便便次数')
-              .fontSize(11)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            Row() {
-              Text(`${this.todayPoopCount}`)
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor('#319795')
-              Text(' 次')
-                .fontSize(11)
-                .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            }
-            Text('肠胃正常')
-              .fontSize(10)
-              .fontColor('#A0AEC0')
-          }
-          .layoutWeight(1)
-          .padding(8)
-          .backgroundColor('#E6FFFA')
-          .borderRadius(12)
-
-          // 嘘嘘
-          Column({ space: 2 }) {
-            Text('💧 嘘嘘次数')
-              .fontSize(11)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            Row() {
-              Text(`${this.todayPeeCount}`)
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor('#3182CE')
-              Text(' 次')
-                .fontSize(11)
-                .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            }
-            Text('换尿布顺畅')
-              .fontSize(10)
-              .fontColor('#A0AEC0')
-          }
-          .layoutWeight(1)
-          .padding(8)
-          .backgroundColor('#EBF8FF')
-          .borderRadius(12)
-
-          // 睡眠
-          Column({ space: 2 }) {
-            Text('🌙 累计睡眠')
-              .fontSize(11)
-              .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            Row() {
-              Text(`${(this.todaySleepMinutes / 60).toFixed(1)}`)
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(AppConstants.COLOR_SECONDARY)
-              Text(' h')
-                .fontSize(11)
-                .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            }
-            Text(`${this.todaySleepMinutes} 分钟`)
-              .fontSize(10)
-              .fontColor('#A0AEC0')
-          }
-          .layoutWeight(1)
-          .padding(8)
-          .backgroundColor('#FAF5FF')
-          .borderRadius(12)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/record/AllRecordsPage' });
+          })
         }
         .width('100%')
+        .padding({ top: 6, bottom: 2 })
       }
-      .width('94%')
-      .padding(14)
-      .backgroundColor(AppConstants.COLOR_CARD_BG)
-      .borderRadius(18)
-      .margin({ top: 4, bottom: 8 })
-      .shadow({ radius: 8, color: 'rgba(0,0,0,0.04)', offsetX: 0, offsetY: 2 })
+      .padding({ left: '3%', right: '3%' })
 
-      // 3. 极速记录快捷操作栏
-      QuickRecordBar({
-        onSelectAction: (typeKey: string) => {
-          if (typeKey === 'FORMULA' || typeKey === 'BREAST') {
-            this.feedingDialogController.open();
-          } else if (typeKey === 'DIAPER') {
-            this.elimDialogController.open();
-          } else if (typeKey === 'SLEEP') {
-            this.sleepDialogController.open();
-          } else if (typeKey === 'SOLIDS') {
-            this.feedingDialogController.open();
+      // 4. 今日记录流列表（仅展示今日，支持侧滑删除与长按删除）
+      if (this.timelineItems.length === 0) {
+        ListItem() {
+          Column({ space: 8 }) {
+            Text('🍼')
+              .fontSize(36)
+            Text('今天还没有记录，点击上方快捷按钮开始记录吧~')
+              .fontSize(13)
+              .fontColor(AppConstants.COLOR_TEXT_MUTED)
           }
+          .width('100%')
+          .padding(40)
+          .alignItems(HorizontalAlign.Center)
         }
-      })
-
-      // 4. 今日时间轴标题
-      Row() {
-        Text('📖 今日喂养流水时间轴')
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppConstants.COLOR_TEXT_MAIN)
-        Blank()
-        Row({ space: 3 }) {
-          Text('全部流水')
-            .fontSize(12)
-            .fontColor(AppConstants.COLOR_PRIMARY)
-          ArrowIcon({ arrowDirection: 'right', variant: 'orange', iconSize: 11 })
-        }
-        .alignItems(VerticalAlign.Center)
-      }
-      .width('94%')
-      .padding({ top: 10, bottom: 6 })
-
-      // 5. 今日记录流列表
-      List({ space: 8 }) {
-        if (this.timelineItems.length === 0) {
+        .padding({ left: '3%', right: '3%' })
+      } else {
+        ForEach(this.timelineItems, (item: TimelineData) => {
           ListItem() {
-            Column({ space: 8 }) {
-              Text('🍼')
-                .fontSize(36)
-              Text('今天还没有记录，点击上方快捷按钮开始记录吧~')
-                .fontSize(13)
-                .fontColor(AppConstants.COLOR_TEXT_MUTED)
-            }
-            .width('100%')
-            .padding(40)
-            .alignItems(HorizontalAlign.Center)
+            TimelineItemCard({ item: item })
           }
-        } else {
-          ForEach(this.timelineItems, (item: TimelineData) => {
-            ListItem() {
-              TimelineItemCard({ item: item })
-            }
-          }, (item: TimelineData) => item.id)
-        }
+          .padding({ left: '3%', right: '3%' })
+          .onClick(() => {
+            router.pushUrl({
+              url: 'pages/record/RecordDetailPage',
+              params: {
+                recordId: item.id,
+                category: item.category
+              }
+            });
+          })
+          .swipeAction({
+            end: {
+              builder: () => {
+                this.renderSwipeDeleteButton(item);
+              }
+            },
+            edgeEffect: SwipeEdgeEffect.Spring
+          })
+          .gesture(
+            LongPressGesture({ duration: 350 })
+              .onAction(() => {
+                this.showDeleteTimelineDialog(item);
+              })
+          )
+        }, (item: TimelineData) => item.id)
       }
-      .layoutWeight(1)
-      .width('94%')
-      .edgeEffect(EdgeEffect.Spring)
+
+      // 底部 spacer，防止浮动 TabBar 遮挡最后一条
+      ListItem() {
+        Row().height(88)
+      }
     }
     .width('100%')
     .height('100%')
+    .edgeEffect(EdgeEffect.Spring)
     .backgroundColor(AppConstants.COLOR_BG_CREAM)
   }
 }

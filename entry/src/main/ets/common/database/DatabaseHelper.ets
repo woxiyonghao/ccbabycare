@@ -475,8 +475,12 @@ export class DatabaseHelper {
       const vacRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_VACCINE));
       const vacs: VaccineRecord[] = [];
       while (vacRs.goToNextRow()) {
+        const id = vacRs.getString(vacRs.getColumnIndex('id'));
+        if (id.startsWith('v_')) {
+          continue;
+        }
         const v = new VaccineRecord(
-          vacRs.getString(vacRs.getColumnIndex('id')),
+          id,
           vacRs.getString(vacRs.getColumnIndex('baby_id')),
           vacRs.getString(vacRs.getColumnIndex('vaccine_name')),
           vacRs.getString(vacRs.getColumnIndex('dose')),
@@ -484,12 +488,17 @@ export class DatabaseHelper {
         );
         v.isDone = vacRs.getLong(vacRs.getColumnIndex('is_done'));
         v.vaccinatedDate = vacRs.getLong(vacRs.getColumnIndex('vaccinated_date'));
+        v.organization = vacRs.getString(vacRs.getColumnIndex('organization'));
+        v.batchNumber = vacRs.getString(vacRs.getColumnIndex('batch_number'));
+        v.isFree = vacRs.getLong(vacRs.getColumnIndex('is_free'));
+        v.adverseReaction = vacRs.getString(vacRs.getColumnIndex('adverse_reaction'));
+        v.reminderDate = vacRs.getLong(vacRs.getColumnIndex('reminder_date'));
+        v.notes = vacRs.getString(vacRs.getColumnIndex('notes'));
+        v.createdAt = vacRs.getLong(vacRs.getColumnIndex('created_at'));
         vacs.push(v);
       }
       vacRs.close();
-      if (vacs.length > 0) {
-        this.vaccineList = vacs;
-      }
+      this.vaccineList = vacs;
 
       // 6. 生长
       const grRs = await this.rdbStore.query(new relationalStore.RdbPredicates(AppConstants.TABLE_GROWTH));
@@ -568,20 +577,11 @@ export class DatabaseHelper {
   }
 
   /**
-   * 初始化公共参考字典数据（奶粉库默认为空不设默认数据；疫苗按国家标准计划表展示）
+   * 初始化公共参考字典数据（奶粉库与疫苗档案均默认为空，由用户根据宝宝实际情况自主添加）
    */
   private initReferenceDataInMemory(): void {
-    // 奶粉库默认为空，由用户根据宝宝实际情况自主添加
     this.formulaProfiles = [];
-
-    if (this.vaccineList.length === 0) {
-      this.vaccineList = VaccineRecord.PRESET_VACCINES.map((p, idx) => {
-        const v = new VaccineRecord(`v_${idx}`, '', p.name, p.dose, p.monthLabel);
-        v.isDone = 0;
-        v.vaccinatedDate = 0;
-        return v;
-      });
-    }
+    this.vaccineList = [];
   }
 
   /**
@@ -589,22 +589,6 @@ export class DatabaseHelper {
    */
   private async seedReferenceDataOnly(): Promise<void> {
     this.initReferenceDataInMemory();
-    if (!this.rdbStore) return;
-
-    try {
-      // 检查疫苗库是否已有数据
-      const vPred = new relationalStore.RdbPredicates(AppConstants.TABLE_VACCINE);
-      const vSet = await this.rdbStore.query(vPred);
-      const vCount = vSet.rowCount;
-      vSet.close();
-      if (vCount <= 0) {
-        for (const v of this.vaccineList) {
-          await this.insertVaccineToDb(v);
-        }
-      }
-    } catch (e) {
-      console.warn('seedReferenceDataOnly error:', JSON.stringify(e));
-    }
   }
 
   // --- SQLite 写入私有辅助函数 ---
@@ -947,6 +931,18 @@ export class DatabaseHelper {
     this.insertEliminationToDb(record);
   }
 
+  deleteEliminationRecord(id: string): void {
+    this.eliminationList = this.eliminationList.filter(r => r.id !== id);
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_ELIMINATION} WHERE id = '${id}'`);
+      } catch (e) {
+        console.warn('deleteEliminationRecord error:', JSON.stringify(e));
+      }
+    }
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
+  }
+
   // --- 睡眠记录 CRUD ---
   getSleepRecords(babyId?: string): SleepRecord[] {
     const targetId = babyId || this.currentBabyId;
@@ -960,13 +956,42 @@ export class DatabaseHelper {
     this.insertSleepToDb(record);
   }
 
+  deleteSleepRecord(id: string): void {
+    this.sleepList = this.sleepList.filter(r => r.id !== id);
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_SLEEP} WHERE id = '${id}'`);
+      } catch (e) {
+        console.warn('deleteSleepRecord error:', JSON.stringify(e));
+      }
+    }
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
+  }
+
   // --- 疫苗记录 CRUD ---
   getVaccineRecords(babyId?: string): VaccineRecord[] {
     const targetId = babyId || this.currentBabyId;
-    if (this.vaccineList.length === 0) {
-      this.initReferenceDataInMemory();
+    return this.vaccineList
+      .filter(r => (!r.babyId || !targetId || r.babyId === targetId) && !r.id.startsWith('v_'))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }
+
+  addVaccineRecord(record: VaccineRecord): void {
+    this.vaccineList.unshift(record);
+    this.insertVaccineToDb(record);
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
+  }
+
+  deleteVaccineRecord(id: string): void {
+    this.vaccineList = this.vaccineList.filter(r => r.id !== id);
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_VACCINE} WHERE id = '${id}'`);
+      } catch (e) {
+        console.warn('deleteVaccineRecord error:', JSON.stringify(e));
+      }
     }
-    return this.vaccineList.filter(r => !r.babyId || !targetId || r.babyId === targetId);
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
   }
 
   updateVaccineStatus(id: string, isDone: number, date?: number): void {
@@ -991,6 +1016,7 @@ export class DatabaseHelper {
           console.warn('updateVaccineStatus error:', JSON.stringify(e));
         }
       }
+      AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
     }
   }
 
@@ -1006,6 +1032,18 @@ export class DatabaseHelper {
     this.growthList.push(record);
     this.growthList.sort((a, b) => a.monthAge - b.monthAge);
     this.insertGrowthToDb(record);
+  }
+
+  deleteGrowthRecord(id: string): void {
+    this.growthList = this.growthList.filter(r => r.id !== id);
+    if (this.rdbStore) {
+      try {
+        this.rdbStore.executeSql(`DELETE FROM ${AppConstants.TABLE_GROWTH} WHERE id = '${id}'`);
+      } catch (e) {
+        console.warn('deleteGrowthRecord error:', JSON.stringify(e));
+      }
+    }
+    AppStorage.setOrCreate('APP_REFRESH_TRIGGER', Date.now());
   }
 
   // --- 花销记账 CRUD ---

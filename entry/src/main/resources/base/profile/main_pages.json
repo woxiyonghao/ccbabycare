@@ -4,7 +4,10 @@
     "pages/privacy/PrivacyPolicyPage",
     "pages/profile/EditBabyProfilePage",
     "pages/statistics/StatisticsPage",
-    "pages/record/CategorySortPage"
+    "pages/record/CategorySortPage",
+    "pages/record/AllRecordsPage",
+    "pages/record/VaccineListPage",
+    "pages/record/RecordDetailPage"
   ]
 }
 
