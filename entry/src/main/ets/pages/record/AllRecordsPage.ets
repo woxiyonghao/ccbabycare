@@ -88,7 +88,24 @@ struct AllRecordsPage {
   }
 
   aboutToAppear() {
+    this.readCategoryParam();
     this.refreshData();
+  }
+
+  private readCategoryParam(): void {
+    try {
+      const params = router.getParams() as Record<string, Object>;
+      if (params && params['category'] !== undefined) {
+        const category = params['category'] as string;
+        const validKeys: string[] = [
+          'ALL', 'FEEDING', 'ELIMINATION', 'SLEEP', 'GROWTH',
+          'VACCINE', 'EXPENSE', 'ROUTINE', 'MESSAGE'
+        ];
+        if (validKeys.indexOf(category) >= 0) {
+          this.selectedCategory = category;
+        }
+      }
+    } catch (e) {}
   }
 
   private refreshData(): void {
@@ -208,7 +225,7 @@ struct AllRecordsPage {
         title: s.sleepType || '睡眠',
         amountDesc: `${s.durationMinutes} 分钟`,
         detailDesc: `${s.method || '自主'}入睡 · ${DateUtil.formatTime(s.startTime)} ~ ${DateUtil.formatTime(s.endTime)}`,
-        timestamp: s.startTime,
+        timestamp: s.endTime,
         caregiverId: s.caregiverId,
         isAbnormal: false
       });

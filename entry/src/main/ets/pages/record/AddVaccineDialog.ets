@@ -16,6 +16,7 @@ export struct AddVaccineDialog {
   @State isFree: number = 1; // 1 一类免费, 0 二类自费
   @State isDone: number = 1; // 1 已接种, 0 待接种
   @State dateStr: string = '';
+  @State dateValue: number = 0;
   @State organization: string = '';
   @State notes: string = '';
 
@@ -41,6 +42,26 @@ export struct AddVaccineDialog {
     const month = (now.getMonth() + 1).toString().padStart(2, '0');
     const day = now.getDate().toString().padStart(2, '0');
     this.dateStr = `${year}-${month}-${day}`;
+    this.dateValue = now.getTime();
+  }
+
+  private openDatePicker(): void {
+    const selected = this.dateValue > 0 ? new Date(this.dateValue) : new Date();
+    DatePickerDialog.show({
+      start: new Date(2020, 0, 1),
+      end: new Date(),
+      selected: selected,
+      onAccept: (value: DatePickerResult) => {
+        if (value.year !== undefined && value.month !== undefined && value.day !== undefined) {
+          const d = new Date(value.year, value.month, value.day);
+          this.dateValue = d.getTime();
+          const y = d.getFullYear();
+          const m = (d.getMonth() + 1).toString().padStart(2, '0');
+          const day = d.getDate().toString().padStart(2, '0');
+          this.dateStr = `${y}-${m}-${day}`;
+        }
+      }
+    });
   }
 
   private handleSave(): void {
@@ -244,16 +265,26 @@ export struct AddVaccineDialog {
               Text('接种/推荐日期')
                 .fontSize(11)
                 .fontColor(AppConstants.COLOR_TEXT_MUTED)
-              TextInput({ placeholder: '如：2026-09-09', text: this.dateStr })
-                .fontSize(12)
-                .height(38)
-                .padding({ left: 8, right: 8 })
-                .backgroundColor('#F7FAFC')
-                .borderRadius(8)
-                .border({ width: 1, color: AppConstants.COLOR_BORDER })
-                .onChange((val: string) => {
-                  this.dateStr = val;
-                })
+              Row() {
+                Text(this.dateStr || '点击选择日期')
+                  .fontSize(12)
+                  .fontColor(AppConstants.COLOR_TEXT_MAIN)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Blank()
+                Text('📅')
+                  .fontSize(14)
+              }
+              .width('100%')
+              .height(38)
+              .padding({ left: 8, right: 8 })
+              .backgroundColor('#F7FAFC')
+              .borderRadius(8)
+              .border({ width: 1, color: AppConstants.COLOR_BORDER })
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => {
+                this.openDatePicker();
+              })
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)

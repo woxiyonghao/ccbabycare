@@ -43,6 +43,28 @@ export struct ProfilePage {
     this.currentDefaultFormulaId = def ? def.id : '';
   }
 
+  private getBirthInfoText(): string {
+    const b = this.currentBaby;
+    const parts: string[] = [];
+    if (b.birthday > 0) {
+      const d = new Date(b.birthday);
+      parts.push(`${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`);
+    }
+    if (b.birthWeight > 0) {
+      parts.push(`${b.birthWeight}kg`);
+    }
+    if (b.birthHeight > 0) {
+      parts.push(`${b.birthHeight}cm`);
+    }
+    if (b.bloodType && b.bloodType !== '未知') {
+      parts.push(`${b.bloodType}型血`);
+    }
+    if (parts.length > 0) {
+      return `出生信息：${parts.join(' · ')}`;
+    }
+    return '出生信息：待补充';
+  }
+
   build() {
     Column({ space: 14 }) {
       // 顶栏
@@ -77,9 +99,12 @@ export struct ProfilePage {
                 Text(`当前月龄：${this.currentBaby.getAgeString()}`)
                   .fontSize(12)
                   .fontColor(AppConstants.COLOR_PRIMARY)
-                Text(`出生信息：${this.currentBaby.birthWeight > 0 ? this.currentBaby.birthWeight + 'kg' : '--'} · ${this.currentBaby.birthHeight > 0 ? this.currentBaby.birthHeight + 'cm' : '--'} · ${this.currentBaby.bloodType && this.currentBaby.bloodType !== '未知' ? this.currentBaby.bloodType + '型血' : '血型未填'}`)
+                Text(this.getBirthInfoText())
                   .fontSize(11)
                   .fontColor(AppConstants.COLOR_TEXT_MUTED)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .lineHeight(15)
               }
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)

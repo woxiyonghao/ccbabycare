@@ -155,6 +155,32 @@ export struct RecordHubPage {
     }
   }
 
+  // 点击四大核心卡片 -> 进入对应分类的记录流水页（而非新增弹窗）
+  private navigateToCategoryPage(key: string): void {
+    let filter: string = 'ALL';
+    if (key === 'feeding') {
+      filter = 'FEEDING';
+    } else if (key === 'elimination') {
+      filter = 'ELIMINATION';
+    } else if (key === 'sleep') {
+      filter = 'SLEEP';
+    } else if (key === 'growth') {
+      filter = 'GROWTH';
+    } else if (key === 'vaccine') {
+      filter = 'VACCINE';
+    } else if (key === 'expense') {
+      filter = 'EXPENSE';
+    } else if (key === 'routine') {
+      filter = 'ROUTINE';
+    } else if (key === 'message') {
+      filter = 'MESSAGE';
+    }
+    router.pushUrl({
+      url: 'pages/record/AllRecordsPage',
+      params: { category: filter }
+    });
+  }
+
   private showToggleVaccineStatusDialog(item: VaccineRecord): void {
     const isCurrentlyDone = item.isDone === 1;
     const targetStatusText = isCurrentlyDone ? '待接种' : '已接种';
@@ -242,7 +268,7 @@ export struct RecordHubPage {
     .backgroundColor(item.bgColor)
     .borderRadius(14)
     .onClick(() => {
-      this.handleSelectCategory(item.key);
+      this.navigateToCategoryPage(item.key);
     })
   }
 
@@ -268,8 +294,7 @@ export struct RecordHubPage {
   }
 
   build() {
-    Scroll() {
-      Column({ space: 12 }) {
+    Column({ space: 12 }) {
         // 1. 顶栏：标题与可点击响应的「全部分类」按钮
         Row() {
           Row({ space: 6 }) {
@@ -302,7 +327,7 @@ export struct RecordHubPage {
           })
         }
         .width('94%')
-        .padding({ top: 16, bottom: 4 })
+        .padding({ top: 8, bottom: 4 })
 
         // 2. 四大核心卡片快捷录入区（动态响应用户分类排序，自适应高度无重叠）
         if (this.topCategories.length >= 4) {
@@ -510,17 +535,15 @@ export struct RecordHubPage {
         .backgroundColor(AppConstants.COLOR_CARD_BG)
         .borderRadius(16)
         .border({ width: 1, color: AppConstants.COLOR_BORDER })
+        .layoutWeight(1)
 
         // 底部 spacer，避让 TabBar
         Row().height(88)
       }
       .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Start)
       .alignItems(HorizontalAlign.Center)
-    }
-    .width('100%')
-    .height('100%')
-    .scrollBar(BarState.Off)
-    .edgeEffect(EdgeEffect.Spring)
-    .backgroundColor(AppConstants.COLOR_BG_CREAM)
+      .backgroundColor(AppConstants.COLOR_BG_CREAM)
   }
 }

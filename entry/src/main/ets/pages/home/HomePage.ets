@@ -301,7 +301,7 @@ export struct HomePage {
         title: s.sleepType || '睡眠',
         amountDesc: `${s.durationMinutes} 分钟`,
         detailDesc: `${s.method || '自主'}入睡 · ${DateUtil.formatTime(s.startTime)} ~ ${DateUtil.formatTime(s.endTime)}`,
-        timestamp: s.startTime,
+        timestamp: s.endTime,
         caregiverId: s.caregiverId,
         isAbnormal: false
       });
@@ -405,9 +405,6 @@ export struct HomePage {
         .width('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 4 })
         .backgroundColor(AppConstants.COLOR_BG_CREAM)
-        .onClick(() => {
-          router.pushUrl({ url: 'pages/profile/EditBabyProfilePage' });
-        })
       }
 
       // 2. 今日核心概览与极速记录（整体卡片设计；去掉「今日喂养概况 >」）
@@ -455,9 +452,6 @@ export struct HomePage {
             .padding({ left: 4, right: 4, top: 8, bottom: 8 })
             .backgroundColor('#FFF5F2')
             .borderRadius(12)
-            .onClick(() => {
-              this.formulaDialogController.open();
-            })
 
             // 便便
             Column({ space: 2 }) {
@@ -487,9 +481,6 @@ export struct HomePage {
             .padding({ left: 4, right: 4, top: 8, bottom: 8 })
             .backgroundColor('#E6FFFA')
             .borderRadius(12)
-            .onClick(() => {
-              this.elimDialogController.open();
-            })
 
             // 嘘嘘
             Column({ space: 2 }) {
@@ -519,9 +510,6 @@ export struct HomePage {
             .padding({ left: 4, right: 4, top: 8, bottom: 8 })
             .backgroundColor('#EBF8FF')
             .borderRadius(12)
-            .onClick(() => {
-              this.elimDialogController.open();
-            })
 
             // 睡眠
             Column({ space: 2 }) {
@@ -551,9 +539,6 @@ export struct HomePage {
             .padding({ left: 4, right: 4, top: 8, bottom: 8 })
             .backgroundColor('#FAF5FF')
             .borderRadius(12)
-            .onClick(() => {
-              this.sleepDialogController.open();
-            })
           }
           .width('100%')
 

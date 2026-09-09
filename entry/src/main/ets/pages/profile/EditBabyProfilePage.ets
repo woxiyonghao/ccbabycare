@@ -19,6 +19,7 @@ struct EditBabyProfilePage {
   @State bloodType: string = 'O';
   @State avatar: string = '👶';
   @State notes: string = '';
+  @State birthdayValue: number = 0;
   @State isFirstSetup: boolean = false;
 
   private bloodOptions: string[] = ['A', 'B', 'AB', 'O', '未知'];
@@ -43,6 +44,8 @@ struct EditBabyProfilePage {
       this.bloodType = '未知';
       this.avatar = '👶';
       this.notes = '';
+      // 出生日期默认今天，家长可点击修改为宝宝真实生日
+      this.birthdayValue = Date.now();
     } else {
       // 修改已有：从当前宝宝档案载入
       const baby = DatabaseHelper.getInstance().getCurrentBaby();
@@ -61,6 +64,7 @@ struct EditBabyProfilePage {
       } else {
         this.notes = '';
       }
+      this.birthdayValue = baby.birthday > 0 ? baby.birthday : Date.now();
     }
   }
 
@@ -88,6 +92,31 @@ struct EditBabyProfilePage {
       if (clean === '') clean = '0';
     }
     return clean;
+  }
+
+  private birthDayText(): string {
+    if (this.birthdayValue <= 0) {
+      return '请选择出生日期';
+    }
+    const d = new Date(this.birthdayValue);
+    const y = d.getFullYear();
+    const m = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    return `${y}年${m}月${day}日`;
+  }
+
+  private openBirthdayPicker(): void {
+    const selected = this.birthdayValue > 0 ? new Date(this.birthdayValue) : new Date();
+    DatePickerDialog.show({
+      start: new Date(2000, 0, 1),
+      end: new Date(),
+      selected: selected,
+      onAccept: (value: DatePickerResult) => {
+        if (value.year !== undefined && value.month !== undefined && value.day !== undefined) {
+          this.birthdayValue = new Date(value.year, value.month, value.day).getTime();
+        }
+      }
+    });
   }
 
   private handleSave(): void {
@@ -120,7 +149,7 @@ struct EditBabyProfilePage {
       const newBaby = new BabyModel(
         `baby_${Date.now()}`,
         trimmedName,
-        Date.now(), // 出生日期默认为当前（0天），不预置虚拟月龄
+        this.birthdayValue > 0 ? this.birthdayValue : Date.now(),
         this.gender,
         w,
         h,
@@ -147,6 +176,7 @@ struct EditBabyProfilePage {
       baby.gender = this.gender;
       baby.birthWeight = w;
       baby.birthHeight = h;
+      baby.birthday = this.birthdayValue;
       baby.bloodType = this.bloodType;
       baby.avatar = this.avatar;
       baby.notes = this.notes.trim();
@@ -285,6 +315,35 @@ struct EditBabyProfilePage {
                   .onClick(() => { this.gender = 'girl'; })
               }
               .width('100%')
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+
+            // 出生日期（月龄按此自动计算）
+            Column({ space: 6 }) {
+              Text('出生日期')
+                .fontSize(12)
+                .fontColor(AppConstants.COLOR_TEXT_MUTED)
+              Row() {
+                Text(this.birthDayText())
+                  .fontSize(15)
+                  .fontColor(AppConstants.COLOR_TEXT_MAIN)
+                Blank()
+                Text('点击选择 ›')
+                  .fontSize(12)
+                  .fontColor(AppConstants.COLOR_PRIMARY)
+              }
+              .width('100%')
+              .height(42)
+              .padding({ left: 12, right: 12 })
+              .backgroundColor('#F7FAFC')
+              .borderRadius(10)
+              .onClick(() => {
+                this.openBirthdayPicker();
+              })
+              Text('月龄将按出生日期自动计算')
+                .fontSize(10)
+                .fontColor(AppConstants.COLOR_TEXT_MUTED)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
